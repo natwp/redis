@@ -1,7 +1,7 @@
 Redis for Windows - MinGW64 portable package
 =============================================
 
-This is an unofficial Windows x64 Redis 8.8.2 revision 1 core build. It is built
+This is an unofficial Windows x64 Redis 8.8.3 revision 1 core build. It is built
 with the MSYS2/MinGW64 toolchain and is configured not to require Visual Studio
 or external MinGW runtime DLLs on the target system.
 
@@ -28,13 +28,14 @@ Package contents:
 - CC0-1.0.txt, GPL-3.0.txt, GCC-RUNTIME-LIBRARY-EXCEPTION.txt,
   GCC-RUNTIME-README.txt, and MINGW-W64-RUNTIME.txt - complete companion
   license texts for statically linked code
+- OPENSSL-LICENSE.txt - Apache 2.0 license for statically linked OpenSSL 3
 - RELEASENOTES.txt - Windows port release notes and validation scope
 - 00-RELEASENOTES - upstream Redis release notes
 - BUILDINFO.txt - exact source commit, tree, toolchain, and package scope
 - WINDOWS-8.8-CHANGES.md - current Redis 8.8 Windows constraints and upgrade guide
 
-This package reports Redis 8.8.2. A public CI release uses
-`Redis-x64-8.8.2-mingw-r1.zip` and the matching revision tag; no tag or
+This package reports Redis 8.8.3. A public CI release uses
+`Redis-x64-8.8.3-mingw-r1.zip` and the matching revision tag; no tag or
 archive is created locally during the pre-publish phase. Verify the adjacent
 SHA-256 file, BUILDINFO, and selected source revision before deployment. Read
 RELEASENOTES.txt before upgrading.
@@ -50,6 +51,22 @@ Console server quick start from a command prompt:
 
     redis-server.exe redis.windows.conf
     redis-cli.exe PING
+
+Native TLS is included through static OpenSSL 3; no OpenSSL DLL is required.
+Ordinary TCP remains the default. To use TLS only, set port 0, tls-port 6379,
+tls-cert-file, tls-key-file, and tls-ca-cert-file. The included configuration
+files have commented examples. Client certificates are required by default.
+
+    redis-cli.exe --tls --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key PING
+
+The same TLS options work with redis-benchmark.exe and rediss:// URLs. Set
+tls-replication yes for replicas and Sentinel, and tls-cluster yes for Cluster
+links. Dedicated client certificate/key options support outbound connections.
+Quote certificate paths containing spaces; use forward slashes for Windows
+paths. Grant the Windows service account read access to its certificate/key
+files. Renew by installing new files and setting the TLS certificate, key and
+CA paths together with CONFIG SET; established connections keep their current
+context until reconnecting. Save configuration changes for the next restart.
 
 Sentinel quick start:
 

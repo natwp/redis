@@ -251,10 +251,10 @@ typedef BOOL (WINAPI *GetNamedPipeClientProcessIdFunc)(HANDLE, PULONG);
 static bool VerifyServicePipeClient(HANDLE pipe, DWORD expectedPid) {
     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
     GetNamedPipeClientProcessIdFunc getClientPid = NULL;
-    if (kernel32 != NULL)
+    if (kernel32 == NULL ||
         win32_get_proc_address(kernel32, "GetNamedPipeClientProcessId",
-                               &getClientPid, sizeof(getClientPid));
-    if (getClientPid == NULL) return false;
+                               &getClientPid, sizeof(getClientPid)) != 0)
+        return false;
     ULONG clientPid = 0;
     return getClientPid(pipe, &clientPid) && clientPid == expectedPid;
 }

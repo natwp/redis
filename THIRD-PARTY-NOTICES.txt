@@ -1,7 +1,7 @@
 Redis for Windows third-party notices
 =========================================
 
-This file accompanies the Redis 8.8.1 MinGW64 core-only portable binaries. It records
+This file accompanies the Redis 8.8.3 MinGW64 core-only portable binaries. It records
 third-party code incorporated into the server, sentinel, checker, CLI, and
 benchmark executables. Redis licensing is provided separately in LICENSE.txt
 and REDISCONTRIBUTIONS.txt; fork-specific Windows notices are in
@@ -14,9 +14,10 @@ The package also includes these complete companion license texts:
 - GCC-RUNTIME-README.txt
 - MINGW-W64-RUNTIME.txt
 - CC0-1.0.txt
+- OPENSSL-LICENSE.txt
 
-The GCC and MinGW texts correspond to the GCC 15.2.0 MSYS2/MinGW64 toolchain
-used for this release. The executables statically link the eligible GCC runtime
+The GCC and MinGW texts accompany the MSYS2/MinGW64 toolchain identified
+in BUILDINFO.txt. The executables statically link the eligible GCC runtime
 libraries under the GCC Runtime Library Exception and portions of the
 MinGW-w64 runtime. EventLog.dll is a resource-only DLL and does not link these
 runtime libraries.
@@ -26,6 +27,18 @@ The following sections reproduce those notices and attributions. Where the
 upstream permission is documented outside an imported source file, its terms
 and provenance are summarized explicitly.
 
+
+-------------------------------------------------------------------------------
+OpenSSL 3
+Source notice: packaging/licenses/OPENSSL-LICENSE.txt
+MSYS2 package: mingw-w64-x86_64-openssl (exact version in BUILDINFO.txt)
+-------------------------------------------------------------------------------
+
+OpenSSL is licensed under the Apache License 2.0. The complete upstream
+license is included as OPENSSL-LICENSE.txt. The MinGW server, Sentinel,
+checkers, CLI and benchmark link libssl and libcrypto statically. EventLog.dll
+does not link OpenSSL. Source and copyright notices are available from
+https://www.openssl.org/source/ and the corresponding MSYS2 source package.
 
 -------------------------------------------------------------------------------
 fast_float decimal conversion

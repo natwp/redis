@@ -1,4 +1,24 @@
 Redis for Windows - https://github.com/natwp/redis
+
+2026-09-21: Redis 8.8.3 Windows core revision 1
+
+Import the upstream queued-command ACL and cluster bus security fixes. The
+new cluster-bus-port-protected-mode option defaults to no, as upstream;
+enabling it requires tls-cluster. Cluster peers must present certificates
+independently of the client-port tls-auth-clients setting.
+
+This candidate includes the qualified static TLS transport, processor-group
+CPU affinity and client ASLR. IOCP accept/write retry accounting belongs to
+the owning event loop and remains safe through delayed close and teardown.
+Plaintext sockets retain the qualified cancellation-event optimization.
+
+The Windows package revision is declared in packaging/mingw/windows-revision.
+Qualification, packaging, evidence and publication reject conflicting revision
+inputs and reuse the exact tested archive. Release candidates require fresh
+Windows qualification; historical qualification does not qualify this source.
+
+--------------------------------------------------------
+
 ========================================================
 
 This file provides information about Windows-specific changes to Redis.

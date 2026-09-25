@@ -32,6 +32,7 @@ windows_revision=$4
 [[ "$windows_revision" =~ ^[1-9][0-9]*$ ]] || die "invalid Windows revision"
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd -P)"
+bash "$repo_root/scripts/windows-package-revision.sh" "$repo_root" "$windows_revision" >/dev/null
 if [[ "$archive" != /* ]]; then
     archive="$repo_root/$archive"
 fi
@@ -91,6 +92,7 @@ GCC-RUNTIME-README.txt
 GPL-3.0.txt
 LICENSE.txt
 MINGW-W64-RUNTIME.txt
+OPENSSL-LICENSE.txt
 PACKAGE-MANIFEST.txt
 README.txt
 REDISCONTRIBUTIONS.txt
@@ -127,7 +129,7 @@ for required_text in \
     LICENSE.txt REDISCONTRIBUTIONS.txt WINDOWS-NOTICES.txt \
     THIRD-PARTY-NOTICES.txt CC0-1.0.txt GPL-3.0.txt \
     GCC-RUNTIME-LIBRARY-EXCEPTION.txt GCC-RUNTIME-README.txt \
-    MINGW-W64-RUNTIME.txt README.txt \
+    MINGW-W64-RUNTIME.txt OPENSSL-LICENSE.txt README.txt \
     RELEASENOTES.txt 00-RELEASENOTES "$changes_doc" BUILDINFO.txt
 do
     [[ -s "$package_dir/$required_text" ]] || die "required package text is empty: $required_text"
@@ -157,6 +159,15 @@ buildinfo_tree="$(sed -n 's/^Source tree: //p' "$package_dir/BUILDINFO.txt")"
 if [[ -n "${SOURCE_SHA:-}" && "$buildinfo_commit" != "$SOURCE_SHA" ]]; then
     die "BUILDINFO source commit does not match the requested qualification source"
 fi
+
+grep -Fx 'TLS build: yes (built in; static OpenSSL)' "$package_dir/BUILDINFO.txt" >/dev/null ||
+    die 'package was not built with static TLS support'
+grep -Eq '^OpenSSL version: 3[.][0-9]+[.][0-9]+' "$package_dir/BUILDINFO.txt" ||
+    die 'BUILDINFO OpenSSL version is missing or invalid'
+grep -Eq '^OpenSSL package: mingw-w64-x86_64-openssl 3[.]' "$package_dir/BUILDINFO.txt" ||
+    die 'BUILDINFO OpenSSL package is missing or invalid'
+grep -F 'Apache License' "$package_dir/OPENSSL-LICENSE.txt" >/dev/null ||
+    die 'OpenSSL license is missing'
 
 manifest="$package_dir/PACKAGE-MANIFEST.txt"
 [[ "$(sed -n '1p' "$manifest")" == "SHA256  SIZE  FILE" ]] || die "invalid package manifest header"
@@ -213,33 +224,16 @@ for pe_file in "$package_dir"/*.exe "$package_dir"/EventLog.dll; do
             grep -Eiq '[[:space:]][.](z?debug[^[:space:]]*|gnu_debuglink)[[:space:]]'; then
         die "$pe_name contains a debug section after release stripping"
     fi
-    case "$pe_name" in
-        *.exe)
-            dll_characteristics="$({ objdump -p "$pe_file" || true; } |
-                sed -n 's/^[[:space:]]*DllCharacteristics[[:space:]]*\([0-9A-Fa-f][0-9A-Fa-f]*\).*/\1/p' |
-                sed -n '1p')"
-            [[ "$dll_characteristics" =~ ^[0-9A-Fa-f]+$ ]] ||
-                die "$pe_name has no readable PE DllCharacteristics field"
-            dll_flags=$((16#$dll_characteristics))
-            (( (dll_flags & 0x0100) != 0 )) ||
-                die "$pe_name does not retain NX compatibility"
-            (( (dll_flags & 0x0040) == 0 )) ||
-                die "$pe_name unexpectedly enables dynamic-base ASLR incompatible with QFork"
-            (( (dll_flags & 0x0020) == 0 )) ||
-                die "$pe_name unexpectedly enables high-entropy ASLR incompatible with QFork"
-            printf '%s\tDllCharacteristics=0x%08x\tNX_COMPAT=1\tDYNAMIC_BASE=0\tHIGH_ENTROPY_VA=0\n' \
-                "$pe_name" "$dll_flags" >> "$layout_report"
-            ;;
-    esac
     {
         printf '== %s ==\n' "$pe_name"
         objdump -p "$pe_file" | sed -n '/The Import Tables/,/The Function Table/p'
     } >> "$imports_report"
 done
+bash "$repo_root/tests/windows/pe-hardening.sh" "$package_dir" >> "$layout_report"
 objdump -h "$package_dir/EventLog.dll" | grep -Eq '[[:space:]][.]rsrc[[:space:]]' ||
     die "EventLog.dll does not contain a PE resource section"
-if grep -Eiq 'DLL Name: (libgcc_s|libstdc\+\+|libwinpthread|libzstd|msys-|cygwin)' "$imports_report"; then
-    grep -Ei 'DLL Name: (libgcc_s|libstdc\+\+|libwinpthread|libzstd|msys-|cygwin)' "$imports_report" >&2
+if grep -Eiq 'DLL Name: (libgcc_s|libstdc\+\+|libwinpthread|libzstd|libssl|libcrypto|ssleay32|libeay32|msys-|cygwin)' "$imports_report"; then
+    grep -Ei 'DLL Name: (libgcc_s|libstdc\+\+|libwinpthread|libzstd|libssl|libcrypto|ssleay32|libeay32|msys-|cygwin)' "$imports_report" >&2
     die "package imports a forbidden non-system runtime DLL"
 fi
 

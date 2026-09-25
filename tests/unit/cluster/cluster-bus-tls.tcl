@@ -7,17 +7,19 @@
 # treats tls-cluster on its own as an authenticated bus port, but they belong to
 # tls-cluster and are pinned here independently of that option.
 
-# Opens a cluster bus connection presenting the given client certificate, then
-# closes it. The handshake outcome is deliberately not inspected here: under TLS
+# Opens a cluster bus connection presenting the given client certificate.
+# The caller keeps it open until the server processes the handshake, then closes
+# it. The handshake outcome is deliberately not inspected here: under TLS
 # 1.3 the client's own handshake completes before the server has validated the
 # certificate, so a rejection is only visible in the server's log. Callers assert
 # on that.
 proc bus_connect_with_cert {host port crt key} {
+    set fd {}
     catch {
         set fd [::tls::socket -cafile "$::tlsdir/ca.crt" -certfile $crt -keyfile $key $host $port]
         ::tls::handshake $fd
-        close $fd
     }
+    return $fd
 }
 
 if {$::tls} {
@@ -29,7 +31,7 @@ if {$::tls} {
             set dir [file normalize [tmpdir cluster-bus-untrusted-ca]]
             exec -ignorestderr openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
                 -subj "/O=Rogue/CN=rogue.example" \
-                -keyout $dir/rogue.key -out $dir/rogue.crt 2>/dev/null
+                -keyout $dir/rogue.key -out $dir/rogue.crt 2> $::test_null_device
 
             set host [srv 0 host]
             set bus [expr {[srv 0 port] + 10000}]
@@ -37,15 +39,20 @@ if {$::tls} {
             set before [count_log_message 0 $rejection]
             set loglines [count_log_lines 0]
 
-            bus_connect_with_cert $host $bus $::tlsdir/redis.crt $::tlsdir/redis.key
-            bus_connect_with_cert $host $bus $dir/rogue.crt $dir/rogue.key
-
-            wait_for_log_messages 0 \
-                {"*Error accepting cluster node connection*certificate verify failed*"} \
-                $loglines 50 100
-            # Exactly one rejection, so the CA-signed peer was accepted on the
-            # same port rather than everything being refused.
-            assert_equal [expr {$before + 1}] [count_log_message 0 $rejection]
+            set trusted [bus_connect_with_cert $host $bus $::tlsdir/redis.crt $::tlsdir/redis.key]
+            set rogue [bus_connect_with_cert $host $bus $dir/rogue.crt $dir/rogue.key]
+            try {
+                wait_for_log_messages 0 \
+                    {"*Error accepting cluster node connection*certificate verify failed*"} \
+                    $loglines 50 100
+                # Keep the trusted socket alive through server-side validation:
+                # TLS 1.3 may finish the client's handshake first, and closing
+                # it early can otherwise produce an unrelated EOF rejection.
+                assert_equal [expr {$before + 1}] [count_log_message 0 $rejection]
+            } finally {
+                if {$trusted ne {}} { catch {close $trusted} }
+                if {$rogue ne {}} { catch {close $rogue} }
+            }
         }
 
         test {a cluster bus peer whose server certificate does not chain to the CA is refused} {
@@ -56,7 +63,7 @@ if {$::tls} {
             set dir [file normalize [tmpdir cluster-bus-untrusted-peer]]
             exec -ignorestderr openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
                 -subj "/O=Rogue/CN=rogue.example" \
-                -keyout $dir/rogue.key -out $dir/rogue.crt 2>/dev/null
+                -keyout $dir/rogue.key -out $dir/rogue.crt 2> $::test_null_device
 
             # A second cluster node, identical to this one except that it serves
             # a self-signed certificate. "wait_ready false" because the suite's
@@ -103,7 +110,7 @@ if {$::tls} {
             # The setting is in effect: on the client port a peer presenting no
             # certificate is served. Driven through redis-cli, since the suite's
             # own client always offers one.
-            assert_equal {PONG} [string trim [exec src/redis-cli --tls \
+            assert_equal {PONG} [string trim [exec $::redis_cli_path --tls \
                 --cacert "$::tlsdir/ca.crt" -h $host -p [srv 0 port] ping]]
 
             # The cluster bus is unaffected: clusterAcceptHandler() demands a
@@ -112,7 +119,7 @@ if {$::tls} {
             # its own handshake completes before the server judges it.
             set loglines [count_log_lines 0]
             catch {exec openssl s_client -connect $host:$bus \
-                -CAfile "$::tlsdir/ca.crt" << "" 2> /dev/null}
+                -CAfile "$::tlsdir/ca.crt" << "" 2> $::test_null_device}
             wait_for_log_messages 0 \
                 {"*Error accepting cluster node connection*peer did not return a certificate*"} \
                 $loglines 50 100

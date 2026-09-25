@@ -1,21 +1,21 @@
-# Redis 8.8.2 core behavior and upgrade guide for Windows
+# Redis 8.8.3 core behavior and upgrade guide for Windows
 
 ## Scope and release identity
 
-This guide describes the unofficial Redis 8.8.2 Windows x64 MinGW port. The
-Redis core baseline is the exact upstream Redis 8.8.2 tag at commit
-`c5031f43a7eaa0d96311746acf759ee6d6acb053`, integrated incrementally through
-Redis 8.0.6, 8.2.8, 8.4.5, 8.6.5, 8.8.1, and 8.8.2 with this fork's IOCP networking,
+This guide describes the unofficial Redis 8.8.3 Windows x64 MinGW port. The
+Redis core baseline is the exact upstream Redis 8.8.3 tag at commit
+`76ec1c311045cf2f28332a95631259cc67ad4b51`, integrated incrementally through
+Redis 8.0.6, 8.2.8, 8.4.5, 8.6.5, 8.8.1, 8.8.2, and 8.8.3 with this fork's IOCP networking,
 FDAPI descriptors, QFork persistence, Windows service, Event Log, console, and
 MinGW64 layers.
 
 The Windows package identity is:
 
 - canonical branch: `mingw-8.8`;
-- upstream release tag: `8.8.2`;
-- package revision tag: `v8.8.2-windows.1`;
-- portable archive: `Redis-x64-8.8.2-mingw-r1.zip`; and
-- adjacent checksum: `Redis-x64-8.8.2-mingw-r1.zip.sha256`.
+- upstream release tag: `8.8.3`;
+- package revision tag: `v8.8.3-windows.1`;
+- portable archive: `Redis-x64-8.8.3-mingw-r1.zip`; and
+- adjacent checksum: `Redis-x64-8.8.3-mingw-r1.zip.sha256`.
 
 The preceding 8.8.1 packages remain immutable as tags
 `v8.8.1-windows.1` and `v8.8.1-windows.2`; a new upstream release starts a
@@ -28,8 +28,8 @@ silently replace an archive; a changed Windows package requires a new revision.
 
 ## Upstream delta and Windows qualification state
 
-The 8.8.2 line carries the prior 8.8.1 Windows hardening and the upstream
-8.8.2 maintenance fixes. The public package is not considered released until
+The 8.8.3 line carries the prior 8.8.1 Windows hardening and the upstream
+8.8.3 maintenance fixes. The public package is not considered released until
 the exact source tip passes the CI-only qualification workflow.
 
 The inherited Windows hardening reviewed and, where needed, fixed or explicitly bounded:
@@ -53,10 +53,17 @@ The inherited Windows hardening reviewed and, where needed, fixed or explicitly 
 - hiredis Windows resolver assertions so non-ASCII DNS names/services fail
   predictably instead of being treated as UTF-8 hostnames.
 
-The upstream 8.8.2 delta additionally covers ACL key resolution for SORT,
+The inherited upstream 8.8.2 fixes cover ACL key resolution for SORT,
 GEORADIUS, and XREAD variants; TLS certificate common-name extraction with
 embedded NULs; blocked-client and pending-TLS lifetime safety; RDB slotinfo
 range validation; and Vector Sets persistence/search hardening.
+
+The 8.8.3 import rechecks queued-command ACL key permissions at EXEC and
+preserves module command-filter cache invalidation. The new
+`cluster-bus-port-protected-mode` defaults to `no`; enabling it requires
+`tls-cluster`, and cluster peers must present certificates independently of
+`tls-auth-clients`. This Windows revision adds static TLS, processor-group
+CPU affinity, client ASLR, and IOCP retry accounting owned by each event loop.
 
 The required public qualification runs on Windows/MinGW64 and records the
 resolved hosted MSYS2 toolchain rather than claiming a fixed compiler version.
@@ -64,15 +71,17 @@ It includes:
 
 - clean core-only package build from the exact source tip;
 - `interop-test.exe --legacy` and `interop-test.exe --modern`;
-- `hiredis-test.exe -h 127.0.0.1 -p 6493 --skip-throughput --skip-inherit-fd`,
-  passing 107 checks with 2 platform skips;
+- `hiredis-test.exe -h 127.0.0.1 -p 6493 --skip-throughput --skip-inherit-fd`;
 - `./runtest-mingw.sh --clients 1 --quiet --timeout 600`;
-- `./runtest-mingw.sh --cluster`, ending `GOOD! No errors.`;
-- `./runtest-mingw.sh --sentinel`, ending `GOOD! No errors.`;
-- `./runtest-mingw.sh --moduleapi --clients 1 --quiet --timeout 300`, passing
-  all 46 module API units; and
-- `./runtest-mingw-service.sh`, passing the isolated elevated
-  `RedisPortTest` Windows service start/restart/Event Log/cleanup gate.
+- `./runtest-mingw.sh --cluster`;
+- `./runtest-mingw.sh --sentinel`;
+- `./runtest-mingw.sh --moduleapi --clients 1 --quiet --timeout 300`; and
+- `./runtest-mingw-service.sh` for isolated elevated Windows service, restart,
+  Event Log, and cleanup coverage.
+
+Plaintext and TLS qualification run against one identical package. Passing
+historical results do not qualify this source; every final tip needs fresh CI
+evidence. The package revision comes from `packaging/mingw/windows-revision`.
 
 The workflow also performs ZIP checksum, manifest, license, PE/import, fresh
 extraction, packaged replication, a 30-minute QFork persistence soak, a short
@@ -81,7 +90,7 @@ build, tag, archive, or release operation is part of this process.
 
 ## Core-only distribution
 
-This archive is Redis 8.8.2 core only. It does not build or ship the bundled
+This archive is Redis 8.8.3 core only. It does not build or ship the bundled
 Redis Search, JSON, TimeSeries, probabilistic, or Vector Sets modules included
 with the full upstream Redis 8 distribution. Those components add independent
 build systems, worker-thread behavior, persistence paths, dependencies, and
@@ -111,9 +120,12 @@ Binary redistribution must preserve:
 - `REDISCONTRIBUTIONS.txt`;
 - `WINDOWS-NOTICES.txt`;
 - `THIRD-PARTY-NOTICES.txt`;
-- the CC0, GCC Runtime Library Exception, GPLv3, and MinGW-w64 companion texts;
+- the OpenSSL, CC0, GCC Runtime Library Exception, GPLv3, and MinGW-w64 companion texts;
 - this guide, the Windows release notes, and BUILDINFO; and
 - access to the exact corresponding source revision.
+
+The standard build statically links OpenSSL 3, records its version and MSYS2
+package in BUILDINFO, and includes `OPENSSL-LICENSE.txt`.
 
 The Redis 8 core adds linked fast_float, TRE, and xxHash code. Their notices,
 along with hiredis, jemalloc, Lua, HdrHistogram, fpconv, linenoise, CRC, hash,
@@ -125,10 +137,11 @@ guide records engineering scope and is not legal advice.
 | Area | Upstream Linux/POSIX behavior | This Windows core package |
 | --- | --- | --- |
 | Event loop | epoll, kqueue, or another POSIX backend | IOCP with synthetic FDAPI descriptors and one-shot readiness rearming |
-| Network transports | TCP, Unix sockets, and optional TLS | Plain TCP over IPv4/IPv6; Unix sockets and TLS are unsupported |
+| Network transports | TCP, Unix sockets, and optional TLS | TCP and native TLS over IPv4/IPv6; Unix sockets are unsupported |
 | Client I/O threads | Multiple read/write I/O threads may be configured | Exactly one client I/O thread is enforced |
 | Background persistence | fork copy-on-write child | QFork starts a Windows child and restores the tracked heap at matching addresses |
-| Executable layout | Normal PIE/ASLR conventions | Dynamic-base and high-entropy ASLR are disabled for QFork address stability |
+| CPU affinity | CPU lists select processors for server and worker threads | Strict thread affinity within one Windows processor group per list |
+| Executable layout | Normal PIE/ASLR conventions | CLI and benchmark enable ASLR and NX; the server and its aliases keep ASLR disabled for QFork |
 | Service integration | daemon, systemd, or syslog conventions | Foreground console or Windows SCM service with Application Event Log support |
 | Native modules | ELF shared objects and POSIX fork assumptions | x64 PE DLLs; module-created fork children are unsupported |
 | Interactive CLI | POSIX terminal handling | Native Windows console input and ANSI translation; redirected input is a separate path |
@@ -148,14 +161,30 @@ future events must use the owning rearm path.
 
 The example configurations bind to `127.0.0.1` and keep protected mode
 enabled. Before adding non-loopback addresses, configure ACL authentication,
-firewall rules, and a trusted transport boundary. This package has no TLS
-listener, TLS replication, TLS Cluster link, or Unix-domain socket support.
-A TLS proxy or VPN is an external security component and must be assessed
-separately.
+firewall rules, and TLS settings. The standard MinGW build supports native TLS
+listeners, CLI/benchmark and `rediss://`, replication (including diskless and
+dedicated RDB channels), Cluster links, and Sentinel. Runtime defaults remain
+ordinary TCP; configure certificates and the TLS options to enable encryption.
+`BUILD_TLS=no` builds an explicit plaintext-only variant. Unix sockets remain
+unsupported.
 
-Startup rejects client `io-threads` values other than 1 and rejects
-`io-threads-do-reads yes`. Treat that as an unsupported configuration rather
-than a tuning warning.
+TLS uses a shared FDAPI BIO and retains IOCP completion ownership during
+synchronous operations. QFork children serialize into the parent-owned
+replication pipe; SSL objects and encryption remain in the parent. See
+WINDOWS-MINGW-README.md for configuration and native TLS tests.
+
+IOCP preserves the connection write barrier for `appendfsync always` across
+separate read and write completions. Deferred accept and write retries belong
+to the owning event loop through delayed close and teardown, with a 100 ms
+accept cadence, 10 ms write cadence, and fair batches of at most 64 writers.
+
+Startup rejects client `io-threads` values other than 1. The retired
+`io-threads-do-reads` option is ignored by Redis 8.8.
+
+`server-cpulist`, `bio-cpulist`, `bgsave-cpulist`, and `aof-rewrite-cpulist`
+retain their underscore aliases. Each list must select available processors
+within one Windows processor group. Invalid lists fail before workers start;
+Windows may still refuse a valid request, which is reported in the log.
 
 Windows include paths are literal and do not support POSIX wildcard expansion.
 List every included configuration file explicitly and use paths writable by
