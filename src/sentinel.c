@@ -297,9 +297,24 @@ typedef struct redisAeEvents {
     int reading, writing;
     int callback_refs;
     int cleanup_pending;
+#ifdef _WIN32
+    long long rearm_timer;
+#endif
 } redisAeEvents;
 
 #ifdef _WIN32
+static int redisAeDisconnectAfterRearmFailure(aeEventLoop *loop, long long id,
+                                             void *privdata)
+{
+    ((void)loop); ((void)id);
+    redisAeEvents *e = privdata;
+    /* A nested event loop must also let the hiredis callback unwind. */
+    if (e->callback_refs || (e->context->c.flags & REDIS_IN_CALLBACK)) return 1;
+    e->rearm_timer = AE_DELETED_EVENT_ID;
+    __redisAsyncDisconnect(e->context);
+    return AE_NOMORE;
+}
+
 /* IOCP readiness is one-shot.  If posting the next readiness request fails,
  * keeping the hiredis event registered would leave a Sentinel link that can
  * never make progress.  Turn the post failure into an ordinary hiredis I/O
@@ -308,6 +323,7 @@ static void redisAeRearmFailed(redisAeEvents *e, int fd,
                                const char *operation)
 {
     int rearm_errno = errno;
+    if (e->rearm_timer != AE_DELETED_EVENT_ID) return;
 
     serverLog(LL_WARNING,
         "Sentinel link fd=%d failed to rearm IOCP %s readiness: %s",
@@ -316,8 +332,15 @@ static void redisAeRearmFailed(redisAeEvents *e, int fd,
     snprintf(e->context->c.errstr, sizeof(e->context->c.errstr),
              "IOCP %s rearm failed: %s",
              operation, wsa_strerror(rearm_errno));
+    e->context->c.flags |= REDIS_DISCONNECTING;
+    aeDeleteFileEvent(e->loop, e->fd, AE_READABLE | AE_WRITABLE);
+    e->reading = e->writing = 0;
+    /* addRead/addWrite run inside hiredis. Freeing its context here can make
+     * the caller resume with freed memory. Disconnect after that stack has
+     * returned; ordinary cleanup cancels this timer if hiredis frees first. */
+    e->rearm_timer = aeCreateTimeEvent(e->loop, 0,
+        redisAeDisconnectAfterRearmFailure, e, NULL);
     errno = rearm_errno;
-    __redisAsyncDisconnect(e->context);
 }
 #endif
 
@@ -353,6 +376,9 @@ static void redisAeWriteEvent(aeEventLoop *el, int fd, void *privdata, int mask)
 
 static void redisAeAddRead(void *privdata) {
     redisAeEvents *e = (redisAeEvents*)privdata;
+#ifdef _WIN32
+    if (e->rearm_timer != AE_DELETED_EVENT_ID) return;
+#endif
     aeEventLoop *loop = e->loop;
     if (!e->reading) {
         e->reading = 1;
@@ -378,6 +404,9 @@ static void redisAeDelRead(void *privdata) {
 
 static void redisAeAddWrite(void *privdata) {
     redisAeEvents *e = (redisAeEvents*)privdata;
+#ifdef _WIN32
+    if (e->rearm_timer != AE_DELETED_EVENT_ID) return;
+#endif
     aeEventLoop *loop = e->loop;
     if (!e->writing) {
         e->writing = 1;
@@ -403,6 +432,12 @@ static void redisAeDelWrite(void *privdata) {
 
 static void redisAeCleanup(void *privdata) {
     redisAeEvents *e = (redisAeEvents*)privdata;
+#ifdef _WIN32
+    if (e->rearm_timer != AE_DELETED_EVENT_ID) {
+        aeDeleteTimeEvent(e->loop, e->rearm_timer);
+        e->rearm_timer = AE_DELETED_EVENT_ID;
+    }
+#endif
     redisAeDelRead(privdata);
     redisAeDelWrite(privdata);
     if (e->callback_refs != 0)
@@ -427,6 +462,9 @@ static int redisAeAttach(aeEventLoop *loop, redisAsyncContext *ac) {
     e->reading = e->writing = 0;
     e->callback_refs = 0;
     e->cleanup_pending = 0;
+#ifdef _WIN32
+    e->rearm_timer = AE_DELETED_EVENT_ID;
+#endif
 
     /* Register functions to start/stop listening for events */
     ac->ev.addRead = redisAeAddRead;

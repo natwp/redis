@@ -1,7 +1,7 @@
 Redis for Windows third-party notices
 =========================================
 
-This file accompanies the Redis 7.4.10 MinGW64 portable binaries. It records
+This file accompanies the Redis 7.4.11 MinGW64 portable binaries. It records
 third-party code incorporated into the server, sentinel, checker, CLI, and
 benchmark executables. Redis licensing is provided separately in LICENSE.txt
 and REDISCONTRIBUTIONS.txt; fork-specific Windows notices are in
@@ -15,8 +15,8 @@ The package also includes these complete companion license texts:
 - MINGW-W64-RUNTIME.txt
 - CC0-1.0.txt
 
-The GCC and MinGW texts correspond to the GCC 15.2.0 MSYS2/MinGW64 toolchain
-used for this release. The executables statically link the eligible GCC runtime
+The GCC and MinGW texts accompany the MSYS2/MinGW64 toolchain identified
+in BUILDINFO.txt. The executables statically link the eligible GCC runtime
 libraries under the GCC Runtime Library Exception and portions of the
 MinGW-w64 runtime. EventLog.dll is a resource-only DLL and does not link these
 runtime libraries.

@@ -19,9 +19,8 @@ on:
         required: false
         type: string
       package_revision:
-        description: Windows package revision to record
+        description: Optional assertion of the source-declared Windows revision
         required: false
-        default: '1'
         type: string
   workflow_call:
     inputs:
@@ -33,7 +32,6 @@ on:
         type: string
       package_revision:
         required: false
-        default: '1'
         type: string
       qualification_gate:
         required: false
@@ -63,7 +61,7 @@ jobs:
     env:
       SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       SOURCE_BRANCH: ${{ inputs.source_branch || github.ref_name }}
-      WINDOWS_PACKAGE_REVISION: ${{ inputs.package_revision || '1' }}
+      WINDOWS_PACKAGE_REVISION: ${{ inputs.package_revision || '' }}
       QUALIFICATION_GATE: ${{ inputs.qualification_gate || '' }}
     steps:
       - name: Check out exact source commit
@@ -136,7 +134,9 @@ jobs:
           version="$(sed -n 's/^#define REDIS_VERSION "\([^"]*\)"/\1/p' src/version.h)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$WINDOWS_PACKAGE_REVISION" =~ ^[1-9][0-9]*$ ]]
+          WINDOWS_PACKAGE_REVISION="$(bash scripts/windows-package-revision.sh . "$WINDOWS_PACKAGE_REVISION")"
+          printf 'WINDOWS_PACKAGE_REVISION=%s\n' "$WINDOWS_PACKAGE_REVISION" >> "$GITHUB_ENV"
+          printf 'windows_revision=%s\n' "$WINDOWS_PACKAGE_REVISION" >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
           printf 'release_tag=v%s-windows.%s\n' "$version" "$WINDOWS_PACKAGE_REVISION" >> "$GITHUB_OUTPUT"
           printf 'artifact_name=windows-qualification-%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"

@@ -41,8 +41,32 @@ command semantics.
 
 Qualification must run the complete source suites and the relevant corrupt-RDB,
 ACL, blocked-client, TLS, and persistence regressions with the MinGW server,
-then confirm a successful authenticated `PING`. Do not substitute a 7.4.10 or
+then confirm a successful authenticated `PING`. Do not substitute a 7.4.11 or
 earlier binary while retaining 7.4.11 metadata.
+
+## Windows revision 1 maintenance
+
+This candidate adds processor-group CPU affinity and enables dynamic-base,
+high-entropy ASLR, NX, and base relocations for the CLI, benchmark, and standalone
+test programs. The server, Sentinel, and checker aliases retain the fixed image
+layout required by the branch's bundled jemalloc and QFork implementation.
+
+IOCP retries are owned by each event loop through attachment, delayed close,
+and teardown. Accept retries retain their 100 ms cadence; blocked writes use
+a 10 ms cadence and fair batches of at most 64 sockets. Retained completion
+ownership prevents callbacks on closed or recycled descriptors, and connection
+write barriers preserve the AOF flush-before-reply contract.
+
+The startup-only CPU options are `server-cpulist`, `bio-cpulist`, `bgsave-cpulist`, `aof-rewrite-cpulist`.
+Each list must select available processors within one Windows processor group.
+Invalid lists fail before worker creation; refused Windows API calls are logged.
+The underscore option aliases are preserved.
+
+`packaging/mingw/windows-revision` declares revision 1. Packaging, CI
+qualification, and release evidence reject conflicting revisions. The package
+remains plaintext and core only, with single-threaded Windows client I/O.
+Every final source tip requires fresh Windows qualification before publication.
+The 7.4 line remains qualification only and has no public release tag.
 
 ## Licensing and notices
 
@@ -79,7 +103,7 @@ guide, not legal advice.
 | Network transports | TCP, optional Unix sockets, and optional TLS builds | TCP over IPv4/IPv6 only in the standard package; Unix sockets and TLS modes are rejected |
 | Client I/O threads | Multiple client read/write I/O threads may be configured | `io-threads 1` and `io-threads-do-reads no` are required and enforced at startup |
 | Background persistence | POSIX `fork()` copy-on-write child | QFork launches a fresh Windows process and maps the Redis heap at matching virtual addresses |
-| Address randomization | Normal PIE/ASLR conventions | MinGW executables disable dynamic-base and high-entropy ASLR so QFork can preserve addresses |
+| Address randomization | Normal PIE/ASLR conventions | Client tools enable ASLR and NX; server aliases keep a fixed image for QFork |
 | Lua allocator | Dedicated jemalloc arena plus a private explicit tcache | Dedicated arena retained; QFork builds use `MALLOCX_TCACHE_NONE` and do not create/destroy the private Lua tcache |
 | BIO completion notification | Pipe readiness follows the selected POSIX event backend | IOCP handler drains and explicitly rearms the one-shot completion pipe |
 | Crash/watchdog path | POSIX signals, `sigaction`, and SIGALRM software watchdog | Native SEH and abort reporting; no POSIX signal recursion contract and no functional SIGALRM watchdog |
@@ -244,7 +268,7 @@ upstream-aligned file and then apply these intentional Windows choices:
 Keep `daemonize no` and `supervised no`; Windows uses a console process or the
 SCM service interface. `daemonize yes` does not create a POSIX daemon and can
 attempt an unsuitable default pidfile path. Linux OOM-score adjustment, THP
-checks, CPU-affinity behavior, process-title controls, systemd/upstart, and
+checks, process-title controls, systemd/upstart, and
 POSIX signal behavior do not map directly to this build. Enabling unsupported
 Linux-only controls can fail startup or `CONFIG SET`.
 
@@ -283,7 +307,7 @@ reconnects selected Redis roots, performs the child operation, and then
 discards the child's private writes. It is a Redis persistence mechanism, not a
 general-purpose process fork API.
 
-The MinGW link uses `--disable-dynamicbase` and
+The server and its aliases use `--disable-dynamicbase` and
 `--disable-high-entropy-va` so the QFork child can reproduce address-sensitive
 heap and image mappings. NX compatibility remains, but reduced ASLR is an
 intentional security tradeoff. Account for it in host isolation, network

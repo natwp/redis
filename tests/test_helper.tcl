@@ -21,6 +21,8 @@ set ::all_tests {
     windows/aof
     windows/iocp
     windows/regression
+    windows/config
+    windows/cpuaffinity
     unit/printver
     unit/dump
     unit/auth
