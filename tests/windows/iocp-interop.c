@@ -215,11 +215,87 @@ static void testFiredOwnership(void) {
     aeDeleteEventLoop(el);
 }
 
+static int shrinking_fd;
+static aeFileEvent *resized_events, *guarded_events;
+
+static void shrinkBeforeDispatch(aeEventLoop *el) {
+    /* Limit each call to its first poll so every visible completion passes
+     * through this hook before dispatch. */
+    aeStop(el);
+    aeFiredEvent *event = &el->fired[0];
+    if (event->backend_data == NULL || event->fd != shrinking_fd ||
+        !(event->mask & AE_READABLE)) return;
+
+    aeDeleteFileEvent(el, shrinking_fd, AE_READABLE);
+    int result = aeResizeSetSize(el, 1);
+    check(result == AE_OK, "shrinks the table after removing a polled read");
+    if (result != AE_OK) return;
+    resized_events = el->events;
+    guarded_events[0] = resized_events[0];
+    el->events = guarded_events;
+}
+
+static void testResizeBeforeDispatch(void) {
+    int pair[2];
+    aeEventLoop *el = aeCreateEventLoop(65536);
+    check(el != NULL, "creates resize-before-dispatch event loop");
+    if (!el) return;
+    int created = FDAPI_pipe_for_eventloop(pair);
+    check(created == 0, "creates resize-before-dispatch socket");
+    if (created != 0) { aeDeleteEventLoop(el); return; }
+    check(pair[0] > 0, "can shrink below the readable descriptor");
+    if (pair[0] <= 0) {
+        close(pair[0]);
+        close(pair[1]);
+        aeDeleteEventLoop(el);
+        return;
+    }
+
+    /* Put the only valid slot immediately before inaccessible memory. An
+     * access through the retained, now-out-of-range fd must fail reliably. */
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    SIZE_T bytes = info.dwPageSize + ((SIZE_T)pair[0] + 1) * sizeof(aeFileEvent);
+    char *region = VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_NOACCESS);
+    void *committed = region ? VirtualAlloc(region, info.dwPageSize,
+                                            MEM_COMMIT, PAGE_READWRITE) : NULL;
+    check(committed != NULL, "allocates a guarded event table");
+    if (committed == NULL) {
+        if (region) VirtualFree(region, 0, MEM_RELEASE);
+        close(pair[0]);
+        close(pair[1]);
+        aeDeleteEventLoop(el);
+        return;
+    }
+    guarded_events = (aeFileEvent *)(region + info.dwPageSize - sizeof(aeFileEvent));
+    resized_events = NULL;
+    shrinking_fd = pair[0];
+    check(aeCreateFileEvent(el, pair[0], AE_READABLE, unusedCallback, NULL) == AE_OK,
+          "queues the read before shrinking its event table");
+    check(write(pair[1], "x", 1) == 1, "makes the read ready before dispatch");
+    aeSetAfterSleepProc(el, shrinkBeforeDispatch);
+    for (int attempt = 0; attempt < 1000 && resized_events == NULL; attempt++) {
+        el->stop = 0;
+        aeProcessEvents(el, AE_FILE_EVENTS | AE_DONT_WAIT | AE_CALL_AFTER_SLEEP);
+        if (resized_events == NULL) Sleep(1);
+    }
+    aeSetAfterSleepProc(el, NULL);
+    check(resized_events != NULL, "observes and discards a read outside the resized table");
+    if (resized_events != NULL) el->events = resized_events;
+    aeDeleteFileEvent(el, pair[0], AE_READABLE);
+    close(pair[0]);
+    close(pair[1]);
+    aeDeleteEventLoop(el);
+    VirtualFree(region, 0, MEM_RELEASE);
+    resized_events = guarded_events = NULL;
+}
+
 int win32_iocp_interop_test(void) {
     failures = 0;
     testAcceptRetry();
     testWriteRetry();
     testFiredOwnership();
+    testResizeBeforeDispatch();
     if (!failures) printf("IOCP loop isolation, retry fairness and ownership tests passed\n");
     return failures;
 }

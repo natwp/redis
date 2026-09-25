@@ -553,7 +553,9 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp,
 static int aeApiFiredEventValid(aeEventLoop *eventLoop, aeFiredEvent *event) {
     aeApiState *state = (aeApiState *)eventLoop->apidata;
     iocpSockState *expected = (iocpSockState *)event->backend_data;
-    return expected != NULL &&
+    /* afterSleep can remove a registration and shrink the table after polling. */
+    return event->fd >= 0 && event->fd < eventLoop->setsize &&
+           expected != NULL &&
            WSIOCP_GetExistingSocketState(event->fd) == expected &&
            expected->completion_port == state->iocp &&
            expected->loop == state->loop &&
