@@ -117,9 +117,20 @@ $(FDAPI_CXX_EXTRA_TARGETS): FDAPI_CXX_EXTRA := $(FDAPI_SYSTEM_REDEFS)
 LDFLAGS_COMMON := \
 	-no-pthread \
 	-static-libgcc \
-	-static-libstdc++ \
+	-static-libstdc++
+
+# QFork restores server data at matching virtual addresses. Client tools and
+# standalone tests do not use QFork and retain normal executable hardening.
+LDFLAGS_SERVER := $(LDFLAGS_COMMON) \
 	-Wl,--disable-dynamicbase \
-	-Wl,--disable-high-entropy-va
+	-Wl,--disable-high-entropy-va \
+	-Wl,--nxcompat
+
+LDFLAGS_TOOL := $(LDFLAGS_COMMON) \
+	-Wl,--dynamicbase \
+	-Wl,--high-entropy-va \
+	-Wl,--nxcompat \
+	-Wl,--enable-reloc-section
 
 LDLIBS_COMMON := \
 	-lws2_32 \
@@ -237,6 +248,7 @@ WIN32_INTEROP_C_SOURCES := \
 	src/Win32_Interop/win32fixes.c \
 	src/Win32_Interop/Win32_ANSI.c \
 	src/Win32_Interop/Win32_APIs.c \
+	src/Win32_Interop/Win32_CpuAffinity.c \
 	src/Win32_Interop/Win32_Error.c \
 	src/Win32_Interop/Win32_PThread.c \
 	src/Win32_Interop/Win32_QFork_impl.c \
@@ -353,12 +365,22 @@ HIREDIS_TEST_OBJS := \
 	$(addprefix $(BUILD)/hiredis-test/,$(TOOL_WIN32_INTEROP_CXX_SOURCES:.cpp=.o))
 
 INTEROP_TEST_C_SOURCES := \
+	tests/windows/sentinel-interop.c \
+	src/adlist.c \
+	src/ae.c \
+	src/monotonic.c \
+	src/redisassert.c \
+	src/zmalloc.c \
+	src/Win32_Interop/win32fixes.c \
+	src/Win32_Interop/Win32_Time.c \
+	src/Win32_Interop/win32_wsiocp.c \
 	src/Win32_Interop/Win32_APIs.c \
 	src/Win32_Interop/Win32_Error.c \
 	src/Win32_Interop/Win32_PThread.c \
 	src/Win32_Interop/Win32_Signal_Process.c \
 	src/Win32_Interop/Win32_ThreadControl.c \
-	tests/windows/llp64.c
+	tests/windows/llp64.c \
+	tests/windows/iocp-interop.c
 
 INTEROP_TEST_CXX_SOURCES := \
 	tests/windows/interop.cpp \
@@ -434,9 +456,9 @@ REDIS_CHECK_ALIASES := $(BUILD)/redis-check-aof.exe $(BUILD)/redis-check-rdb.exe
 TEST_MODULE_SOURCES := $(sort $(wildcard tests/modules/*.c))
 TEST_MODULES := $(patsubst tests/modules/%.c,$(BUILD)/tests/modules/%.so,$(TEST_MODULE_SOURCES))
 
-.PHONY: all clean distclean deps eventlog hiredis-test interop-test test-launcher test-modules FORCE
+.PHONY: all clean distclean deps eventlog hiredis-test interop-test affinity-test test-launcher test-modules FORCE
 
-all: $(BUILD)/redis-server.exe $(BUILD)/redis-cli.exe $(BUILD)/redis-benchmark.exe $(REDIS_CHECK_ALIASES) $(EVENTLOG_DLL) $(BUILD)/redis-test-launcher.exe
+all: $(BUILD)/redis-server.exe $(BUILD)/redis-cli.exe $(BUILD)/redis-benchmark.exe $(REDIS_CHECK_ALIASES) $(EVENTLOG_DLL) $(BUILD)/redis-test-launcher.exe $(BUILD)/redis-affinity-test.exe
 
 deps: $(HIREDIS_LIB) $(LUA_LIB) $(HDR_HISTOGRAM_OBJS) $(FPCONV_LIB) $(JEMALLOC_LIB)
 
@@ -445,6 +467,8 @@ eventlog: $(EVENTLOG_DLL)
 hiredis-test: $(BUILD)/hiredis-test.exe
 
 interop-test: $(BUILD)/interop-test.exe
+
+affinity-test: $(BUILD)/redis-affinity-test.exe
 
 test-launcher: $(BUILD)/redis-test-launcher.exe
 
@@ -506,28 +530,39 @@ $(EVENTLOG_DLL): Makefile.mingw $(EVENTLOG_OBJ)
 	$(CC) -shared -nostdlib -Wl,--entry,0 -o $@ $(EVENTLOG_OBJ)
 
 $(BUILD)/redis-server.exe: Makefile.mingw $(SERVER_OBJS) $(HIREDIS_LIB) $(LUA_LIB) $(HDR_HISTOGRAM_OBJS) $(JEMALLOC_LIB) $(FPCONV_LIB)
-	$(CXX) $(LDFLAGS_COMMON) -o $@ $(SERVER_OBJS) $(HIREDIS_LIB) $(LUA_LIB) $(HDR_HISTOGRAM_OBJS) $(JEMALLOC_LIB) $(FPCONV_LIB) $(LDLIBS_COMMON)
+	$(CXX) $(LDFLAGS_SERVER) -o $@ $(SERVER_OBJS) $(HIREDIS_LIB) $(LUA_LIB) $(HDR_HISTOGRAM_OBJS) $(JEMALLOC_LIB) $(FPCONV_LIB) $(LDLIBS_COMMON)
 
 $(BUILD)/redis-cli.exe: Makefile.mingw $(CLI_OBJS) $(HIREDIS_LIB)
-	$(CXX) $(LDFLAGS_COMMON) -o $@ $(CLI_OBJS) $(HIREDIS_LIB) $(LDLIBS_COMMON)
+	$(CXX) $(LDFLAGS_TOOL) -o $@ $(CLI_OBJS) $(HIREDIS_LIB) $(LDLIBS_COMMON)
 
 $(BUILD)/redis-benchmark.exe: Makefile.mingw $(BENCHMARK_OBJS) $(HIREDIS_LIB) $(HDR_HISTOGRAM_OBJS) $(FPCONV_LIB)
-	$(CXX) $(LDFLAGS_COMMON) -o $@ $(BENCHMARK_OBJS) $(HIREDIS_LIB) $(HDR_HISTOGRAM_OBJS) $(FPCONV_LIB) $(LDLIBS_COMMON)
+	$(CXX) $(LDFLAGS_TOOL) -o $@ $(BENCHMARK_OBJS) $(HIREDIS_LIB) $(HDR_HISTOGRAM_OBJS) $(FPCONV_LIB) $(LDLIBS_COMMON)
 
 $(REDIS_CHECK_ALIASES): $(BUILD)/redis-server.exe
 	cp -f $< $@
 
 $(BUILD)/hiredis-test.exe: Makefile.mingw $(HIREDIS_TEST_OBJS) $(HIREDIS_LIB)
-	$(CXX) $(LDFLAGS_COMMON) -o $@ $(HIREDIS_TEST_OBJS) $(HIREDIS_LIB) $(LDLIBS_COMMON)
+	$(CXX) $(LDFLAGS_TOOL) -o $@ $(HIREDIS_TEST_OBJS) $(HIREDIS_LIB) $(LDLIBS_COMMON)
 
-$(BUILD)/interop-test.exe: Makefile.mingw $(INTEROP_TEST_OBJS)
-	$(CXX) $(LDFLAGS_COMMON) -o $@ $(INTEROP_TEST_OBJS) $(LDLIBS_COMMON)
+$(BUILD)/interop-test.exe: Makefile.mingw $(INTEROP_TEST_OBJS) $(HIREDIS_LIB)
+	$(CXX) $(LDFLAGS_TOOL) -o $@ $(INTEROP_TEST_OBJS) $(HIREDIS_LIB) $(LDLIBS_COMMON)
 
-$(AE_OBJS): $(AE_BACKEND_SOURCE)
+$(BUILD)/interop-test/tests/windows/sentinel-interop.o: TOOL_CFLAGS += -I$(BUILD)/interop-test
+$(BUILD)/interop-test/tests/windows/sentinel-interop.o: $(BUILD)/interop-test/sentinel-adapter.inc
+
+$(BUILD)/interop-test/sentinel-adapter.inc: src/sentinel.c Makefile.mingw
+	mkdir -p $(dir $@)
+	awk '/^typedef struct redisAeEvents \{/ {emit=1} emit && /^\/\* =+ Prototypes/ {emit=0; found=1} emit {print} END {if (!found) exit 1}' $< > $@
+
+$(AE_OBJS) $(BUILD)/interop-test/src/ae.o: $(AE_BACKEND_SOURCE)
 
 $(BUILD)/redis-test-launcher.exe: Makefile.mingw tests/windows/test-launcher.c
 	mkdir -p $(dir $@)
-	$(CC) $(TEST_LAUNCHER_CFLAGS) $(TEST_LAUNCHER_LDFLAGS) $(LDFLAGS_COMMON) -o $@ tests/windows/test-launcher.c -lws2_32
+	$(CC) $(TEST_LAUNCHER_CFLAGS) $(TEST_LAUNCHER_LDFLAGS) $(LDFLAGS_TOOL) -o $@ tests/windows/test-launcher.c -lws2_32
+
+$(BUILD)/redis-affinity-test.exe: Makefile.mingw tests/windows/cpuaffinity.c src/Win32_Interop/Win32_CpuAffinity.c src/Win32_Interop/Win32_CpuAffinity.h src/Win32_Interop/Win32_RedisLog.h
+	mkdir -p $(dir $@)
+	$(CC) $(TEST_LAUNCHER_CFLAGS) -Isrc $(LDFLAGS_TOOL) -o $@ tests/windows/cpuaffinity.c
 
 $(BUILD)/tests/modules/%.so: tests/modules/%.c src/redismodule.h src/Win32_Interop/win32_types_hiredis.h Makefile.mingw
 	mkdir -p $(dir $@)
@@ -594,6 +629,7 @@ clean:
 	rm -rf $(BUILD)/eventlog $(BUILD)/hiredis-test $(BUILD)/interop-test
 	rm -rf $(BUILD)/tests/modules
 	rm -f $(BUILD)/redis-server.exe $(BUILD)/redis-cli.exe $(BUILD)/redis-benchmark.exe $(REDIS_CHECK_ALIASES) $(EVENTLOG_DLL) $(BUILD)/hiredis-test.exe $(BUILD)/interop-test.exe $(BUILD)/redis-test-launcher.exe
+	rm -f $(BUILD)/redis-affinity-test.exe
 	rm -rf $(BUILD)/lib
 
 distclean: clean

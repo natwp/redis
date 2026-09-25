@@ -2,31 +2,31 @@
 
 ## Scope and release identity
 
-This is an unofficial Windows x64 integration of the Redis 7.2.15 behavior
+This is an unofficial Windows x64 integration of the Redis 7.2.16 behavior
 baseline, including its upstream security fixes, onto this fork's IOCP
 networking, FDAPI descriptors, QFork persistence,
 Windows service/Event Log, console, and MinGW64 build layers. The source tree
-reports `7.2.15`; the canonical `mingw-7.2` branch is the maintenance line.
-Windows revision 1 is identified by tag `v7.2.15-windows.1` and archive
-`Redis-x64-7.2.15-mingw-r1.zip`. The historical `v7.2.14` and
+reports `7.2.16`; the canonical `mingw-7.2` branch is the maintenance line.
+Windows revision 2 is identified by tag `v7.2.16-windows.2` and archive
+`Redis-x64-7.2.16-mingw-r2.zip`. The historical `v7.2.14` and
 `v7.2.14-windows.1` tags and their corresponding
 `Redis-x64-7.2.14-mingw.zip` and `Redis-x64-7.2.14-mingw-r1.zip` archives
 remain immutable.
 
-This guide documents behavior that differs from the original Redis 7.2.15
+This guide documents behavior that differs from the original Redis 7.2.16
 Linux/POSIX distribution, plus the upgrade boundaries that matter when moving
 from this fork's Redis 6.2 line. Redis command, protocol, persistence-format,
 replication, Cluster, Sentinel, ACL, Lua, and Function behavior otherwise
-follows upstream Redis 7.2.15. See `00-RELEASENOTES` for the complete upstream
+follows upstream Redis 7.2.16. See `00-RELEASENOTES` for the complete upstream
 release history and command-level compatibility notes.
 
 The required clean build, focused and full test suites, package extraction,
-long persistence soak, and exact service-restart gates are the Redis 7.2.15
+long persistence soak, and exact service-restart gates are the Redis 7.2.16
 release gates. The historical Redis 7.2.14 archives remain immutable.
 
 ### Upstream security-fix provenance
 
-The 7.2.15 source baseline includes the applicable upstream security fixes for
+The 7.2.16 source baseline includes the applicable upstream security fixes for
 Lua parser/runtime isolation, blocked-client eviction, RESTORE/RDB validation,
 and full-sync while a yielding script or Function is running. It also rejects
 a crafted stream `RESTORE` payload when more than one consumer claims the same
@@ -39,9 +39,32 @@ The standard package is x64 and excludes TLS. Visual Studio/MSI,
 clean-machine, antivirus, and unrelated external deployment checks are not
 covered by this local release matrix.
 
+## Windows revision 2 maintenance
+
+This candidate adds processor-group CPU affinity and enables dynamic-base,
+high-entropy ASLR, NX, and base relocations for the CLI, benchmark, and standalone
+test programs. The server, Sentinel, and checker aliases retain the fixed image
+layout required by the branch's bundled jemalloc and QFork implementation.
+
+IOCP retries are owned by each event loop through attachment, delayed close,
+and teardown. Accept retries retain their 100 ms cadence; blocked writes use
+a 10 ms cadence and fair batches of at most 64 sockets. Retained completion
+ownership prevents callbacks on closed or recycled descriptors, and connection
+write barriers preserve the AOF flush-before-reply contract.
+
+The startup-only CPU options are `server_cpulist`, `bio_cpulist`, `bgsave_cpulist`, `aof_rewrite_cpulist`.
+Each list must select available processors within one Windows processor group.
+Invalid lists fail before worker creation; refused Windows API calls are logged.
+This line preserves the underscore option names.
+
+`packaging/mingw/windows-revision` declares revision 2. Packaging, CI
+qualification, and release evidence reject conflicting revisions. The package
+remains plaintext and core only, with single-threaded Windows client I/O.
+Every final source tip requires fresh Windows qualification before publication.
+
 ## Linux/POSIX and Windows behavior differences
 
-| Area | Original Redis 7.2.15 on Linux/POSIX | This Windows port |
+| Area | Original Redis 7.2.16 on Linux/POSIX | This Windows port |
 | --- | --- | --- |
 | Event loop | OS-specific POSIX backend such as `epoll` or `kqueue` | IOCP with synthetic FDAPI descriptors |
 | Network transports | TCP, optional Unix sockets, and optional TLS builds | TCP only in the standard package; Unix sockets are rejected and TLS is not built |
@@ -50,7 +73,7 @@ covered by this local release matrix.
 | Native modules | Usually ELF shared objects; module fork API available | x64 PE modules; module-created fork children are unsupported and the fork API entries are unavailable in the Windows module table; persistence callbacks have a restricted QFork contract |
 | Lua debugger | Synchronous or forked debugger session | `SCRIPT DEBUG sync` only; forked `SCRIPT DEBUG yes` is rejected when execution starts |
 | Daemon/supervision | `daemonize`, systemd/upstart integration, Unix signals | Console process or Windows SCM service; no POSIX daemon or systemd/upstart behavior |
-| System integration | syslog, Linux OOM score, THP checks, CPU affinity, process titles | Windows Application Event Log and SCM; the listed Linux controls do not have equivalent behavior in this build |
+| System integration | syslog, Linux OOM score, THP checks, process titles | Windows Application Event Log and SCM; the listed Linux controls do not have equivalent behavior in this build |
 | Distribution | Source build/install conventions vary by platform | Flat x64 ZIP; no external MinGW runtime, MSYS2, Tcl, or Visual Studio installation is required at runtime |
 
 ## Networking, CLI, and benchmark behavior
@@ -93,7 +116,7 @@ comments retained for less common options are reference material. Compare a
 deployment configuration with the source tree's upstream-aligned `redis.conf`
 and then apply these intentional package differences:
 
-| Setting | Packaged Windows examples | Upstream 7.2.15 example/default | Notes |
+| Setting | Packaged Windows examples | Upstream 7.2.16 example/default | Notes |
 | --- | --- | --- | --- |
 | `bind` | `127.0.0.1` | `127.0.0.1 -::1` in `redis.conf` | Conservative IPv4-loopback package default |
 | `repl-diskless-sync` | `no` | `yes` | The examples prefer disk-backed full synchronization; diskless QFork replication remains supported and tested |
@@ -176,7 +199,7 @@ reconnects selected Redis roots, performs the requested child operation, and
 then discards the child's private writes. It is a persistence mechanism, not a
 general-purpose fork implementation.
 
-The MinGW executables intentionally disable dynamic-base and high-entropy ASLR
+The server and its aliases disable dynamic-base and high-entropy ASLR
 so the mapped heap can occupy the same addresses in parent and child. The port
 uses the bundled jemalloc 5.3.0 tree and its Windows heap/page-tracking hooks;
 do not substitute the completed 6.2 line's jemalloc 5.2.1 tree. QFork also
@@ -186,7 +209,8 @@ fragmentation, modules, and concurrent background work rather than relying on
 old fixed `--maxheap` or pagefile formulas.
 
 Disabling image-base randomization is a deliberate QFork compatibility and
-security tradeoff. The executables retain NX compatibility, but deployments
+security tradeoff for the server. Client tools enable ASLR and all executables
+retain NX compatibility. Deployments
 must account for the reduced ASLR protection when evaluating host isolation,
 network exposure, patching, and access controls.
 
@@ -381,7 +405,7 @@ Before deployment:
   build modifies tracked source. `BUILDINFO.txt` correctly identifies this
   line's `jemalloc-5.3.0-redis` Windows QFork tree rather than the separate 6.2
   line's jemalloc 5.2.1 tree.
-- A clean source checkpoint built Redis 7.2.15 with the repository MinGW64
+- A clean source checkpoint built Redis 7.2.16 with the repository MinGW64
   toolchain; both legacy and modern Windows interop tests passed and all Module
   API test binaries were rebuilt. The authoritative root rerun passed all
   required units, including replication and the Windows IOCP/regression units.

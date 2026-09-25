@@ -22,8 +22,24 @@ jobs:
           persist-credentials: false
       - name: Run public-source hygiene checks
         run: ./scripts/check-public-hygiene.sh --history
+      - name: Validate source-declared Windows package revisions
+        run: bash tests/windows/package-revision-test.sh
+      - name: Validate release artifact identity and transport gates
+        run: python3 tests/windows/release-assets-test.py
+      - name: Validate release preflight gates
+        run: python3 tests/windows/release-preflight-test.py
       - name: Validate packaged process-instance semantics
         run: bash tests/windows/package-process-identity-test.sh
+      - name: Compile shared startup code on Linux
+        # Supply the legacy port annotations and native LP64 aliases while
+        # leaving _WIN32 undefined, so Windows-only startup code must be guarded.
+        run: |
+          cc -std=gnu11 -Werror=implicit-function-declaration -DREDIS_STATIC= \
+            -include src/Win32_Interop/Win32_Portability.h \
+            -DPORT_LONGLONG='long long' -DPORT_LONG=long -DPORT_ULONG='unsigned long' \
+            -Ideps/hiredis -Ideps/linenoise -Ideps/lua/src \
+            -Ideps/hdr_histogram -Ideps/fpconv \
+            -c src/server.c -o "$RUNNER_TEMP/redis-server-startup.o"
 
   mingw-smoke:
     runs-on: windows-latest
@@ -88,7 +104,14 @@ jobs:
         run: >-
           ./runtest-mingw.sh --clients 1 --quiet --timeout 300
           --single unit/type/string --single unit/printver
+          --single windows/config --single windows/cpuaffinity --single windows/iocp
+      - name: Run Windows CPU affinity tests
+        run: ./build/mingw64/redis-affinity-test.exe
+      - name: Audit executable hardening
+        run: bash tests/windows/pe-hardening.sh build/mingw64
       - name: Run Windows interop test
         run: |
           ./build/mingw64/interop-test.exe --legacy
           ./build/mingw64/interop-test.exe --modern
+      - name: Check Sentinel links and configuration updates
+        run: ./runtest-mingw.sh --sentinel --single 00-base --single 01-conf-update

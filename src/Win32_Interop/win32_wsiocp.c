@@ -31,8 +31,42 @@
 #include <errno.h>
 
 static HANDLE iocph;
-static volatile LONG acceptRearmPending;
-static volatile LONG writeRearmPending;
+struct iocpLoopState {
+    HANDLE port;
+    volatile LONG refs;
+    volatile LONG active;
+    volatile LONG accept_rearm_pending;
+    volatile LONG write_rearm_pending;
+    struct iocpLoopState *next;
+};
+static iocpLoopState *loops;
+static SRWLOCK loopLock = SRWLOCK_INIT;
+static INIT_ONCE closeHookOnce = INIT_ONCE_STATIC_INIT;
+
+static void WSIOCP_ReleaseLoop(iocpLoopState *loop) {
+    if (loop != NULL && InterlockedDecrement(&loop->refs) == 0)
+        FreeMemoryNoCOW(loop);
+}
+
+static iocpLoopState *WSIOCP_RetainLoop(HANDLE port) {
+    iocpLoopState *loop;
+    AcquireSRWLockShared(&loopLock);
+    for (loop = loops; loop != NULL; loop = loop->next) {
+        if (loop->port == port) {
+            InterlockedIncrement(&loop->refs);
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&loopLock);
+    return loop;
+}
+
+static BOOL CALLBACK WSIOCP_InitializeCloseHook(PINIT_ONCE once,
+                                               PVOID parameter, PVOID *context) {
+    (void)once; (void)parameter; (void)context;
+    FDAPI_SetCloseSocketState(WSIOCP_CloseSocketStateRFD);
+    return TRUE;
+}
 
 #define SUCCEEDED_WITH_IOCP(result) \
     ((result) || (FDAPI_WSAGetLastError() == WSA_IO_PENDING))
@@ -51,6 +85,8 @@ iocpSockState* WSIOCP_GetExistingSocketState(int fd) {
 
 /* Get the socket state. Create if not found. */
 iocpSockState* WSIOCP_GetSocketState(int fd) {
+    /* Synchronous TLS tools can retain state before creating an event loop. */
+    InitOnceExecuteOnce(&closeHookOnce, WSIOCP_InitializeCloseHook, NULL, NULL);
     iocpSockState *existing = WSIOCP_GetExistingSocketState(fd);
     if (existing != NULL) return existing;
 
@@ -112,7 +148,8 @@ static BOOL WSIOCP_HasOutstandingState(const iocpSockState *socketState) {
 static void WSIOCP_ClearAcceptRearmNeeded(iocpSockState *socketState) {
     if (socketState->masks & ACCEPT_REARM_NEEDED) {
         socketState->masks &= ~ACCEPT_REARM_NEEDED;
-        InterlockedDecrement(&acceptRearmPending);
+        if (socketState->loop != NULL)
+            InterlockedDecrement(&socketState->loop->accept_rearm_pending);
     }
     socketState->accept_rearm_logged = 0;
 }
@@ -121,18 +158,21 @@ static void WSIOCP_MarkAcceptRearmNeeded(iocpSockState *socketState) {
     if ((socketState->masks & ACCEPT_REARM_NEEDED) == 0) {
         socketState->masks |= ACCEPT_REARM_NEEDED;
         socketState->accept_rearm_logged = 0;
-        InterlockedIncrement(&acceptRearmPending);
+        if (socketState->loop != NULL)
+            InterlockedIncrement(&socketState->loop->accept_rearm_pending);
     }
 }
 
-BOOL WSIOCP_AcceptRearmPending(void) {
-    return InterlockedCompareExchange(&acceptRearmPending, 0, 0) != 0;
+BOOL WSIOCP_AcceptRearmPending(iocpLoopState *loop) {
+    return loop != NULL && loop->active &&
+           InterlockedCompareExchange(&loop->accept_rearm_pending, 0, 0) != 0;
 }
 
 static void WSIOCP_ClearWriteRearmNeeded(iocpSockState *socketState) {
     if (socketState->masks & WRITE_REARM_NEEDED) {
         socketState->masks &= ~WRITE_REARM_NEEDED;
-        InterlockedDecrement(&writeRearmPending);
+        if (socketState->loop != NULL)
+            InterlockedDecrement(&socketState->loop->write_rearm_pending);
     }
     socketState->write_rearm_logged = 0;
 }
@@ -141,12 +181,14 @@ static void WSIOCP_MarkWriteRearmNeeded(iocpSockState *socketState) {
     if ((socketState->masks & WRITE_REARM_NEEDED) == 0) {
         socketState->masks |= WRITE_REARM_NEEDED;
         socketState->write_rearm_logged = 0;
-        InterlockedIncrement(&writeRearmPending);
+        if (socketState->loop != NULL)
+            InterlockedIncrement(&socketState->loop->write_rearm_pending);
     }
 }
 
-BOOL WSIOCP_WriteRearmPending(void) {
-    return InterlockedCompareExchange(&writeRearmPending, 0, 0) != 0;
+BOOL WSIOCP_WriteRearmPending(iocpLoopState *loop) {
+    return loop != NULL && loop->active &&
+           InterlockedCompareExchange(&loop->write_rearm_pending, 0, 0) != 0;
 }
 
 void WSIOCP_CancelWriteReady(int fd) {
@@ -173,6 +215,10 @@ BOOL WSIOCP_TryFinalizeClosedState(iocpSockState *socketState) {
     WSIOCP_DisposeCompletedAccepts(socketState);
     socketState->masks &= ~CLOSE_PENDING;
     FDAPI_ClearSocketInfo(fd);
+#ifdef USE_OPENSSL
+    if (socketState->read_event) CloseHandle(socketState->read_event);
+#endif
+    WSIOCP_ReleaseLoop(socketState->loop);
     FreeMemoryNoCOW(socketState);
     return TRUE;
 }
@@ -193,6 +239,10 @@ BOOL WSIOCP_CloseSocketState(iocpSockState* socketState) {
     WSIOCP_DisposeCompletedAccepts(socketState);
     if (!WSIOCP_HasOutstandingState(socketState)) {
         FDAPI_ClearSocketState(socketState->fd, socketState);
+#ifdef USE_OPENSSL
+        if (socketState->read_event) CloseHandle(socketState->read_event);
+#endif
+        WSIOCP_ReleaseLoop(socketState->loop);
         FreeMemoryNoCOW(socketState);
         return TRUE;
     } else {
@@ -214,23 +264,37 @@ int WSIOCP_SocketAttachToPort(int fd, iocpSockState *socketState,
         socketState = WSIOCP_GetSocketState(fd);
     }
 
-    if (completionPort == NULL || socketState == NULL) {
+    if (completionPort == NULL || socketState == NULL ||
+        (socketState->masks & CLOSE_PENDING)) {
         errno = EINVAL;
         return -1;
     }
 
     if (socketState->masks & SOCKET_ATTACHED) {
-        if (socketState->completion_port == completionPort) return 0;
+        if (socketState->completion_port == completionPort &&
+            socketState->loop != NULL && socketState->loop->active) return 0;
         errno = EINVAL;
         return -1;
     }
 
+    iocpLoopState *loop = WSIOCP_RetainLoop(completionPort);
+    if (loop == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
     if (FDAPI_SocketAttachIOCP(fd, completionPort)) {
         socketState->completion_port = completionPort;
+        socketState->loop = loop;
         socketState->masks |= SOCKET_ATTACHED;
+        /* An accept can fail before its listener acquires an event loop. */
+        if (socketState->masks & ACCEPT_REARM_NEEDED)
+            InterlockedIncrement(&loop->accept_rearm_pending);
+        if (socketState->masks & WRITE_REARM_NEEDED)
+            InterlockedIncrement(&loop->write_rearm_pending);
         return 0;
     }
 
+    WSIOCP_ReleaseLoop(loop);
     return -1;
 }
 
@@ -444,6 +508,26 @@ int WSIOCP_Accept(int fd, struct sockaddr *sa, socklen_t *len) {
     return acceptfd;
 }
 
+#ifdef USE_OPENSSL
+/* Only owners with an immutable plaintext transport may opt out of read
+ * cancellation events. Generic descriptors must remain eligible for TLS
+ * attachment after I/O has already been posted. */
+int WSIOCP_SetPlaintextOnly(int fd) {
+    iocpSockState *state = WSIOCP_GetSocketState(fd);
+    if (!state) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (state->event_refs || state->read_event ||
+        (state->masks & (READ_QUEUED | CONNECT_PENDING | CLOSE_PENDING))) {
+        errno = EBUSY;
+        return -1;
+    }
+    state->plaintext_only = 1;
+    return 0;
+}
+#endif
+
 /* After doing a read, the caller needs to call this method in
  * order to continue to check for read events.
  * This is not necessary if the caller will delete read events */
@@ -461,13 +545,30 @@ int WSIOCP_QueueNextRead(int fd) {
     /* ConnectEx and read readiness share ov_read. Never reuse it while an
      * overlapped operation is still pending. */
     if ((sockstate->masks & SOCKET_ATTACHED) == 0 ||
-        (sockstate->masks & (READ_QUEUED | CONNECT_PENDING)) != 0) {
+        (sockstate->masks & (READ_QUEUED | CONNECT_PENDING | CLOSE_PENDING)) != 0) {
         return 0;
     }
+#ifdef USE_OPENSSL
+    if (sockstate->read_suspended) return 0;
+    /* Generic sockets need an event before I/O, even if TLS attaches later.
+     * A connection committed to plaintext only uses ordinary IOCP delivery. */
+    if (!sockstate->plaintext_only && !sockstate->read_event) {
+        sockstate->read_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (!sockstate->read_event) {
+            set_errno_from_last_error();
+            return -1;
+        }
+    }
+    /* WSARecv resets hEvent before returning a pending operation. Avoid a
+     * redundant ResetEvent system call on every read, including plaintext. */
+#endif
 
     // Use zero length read with overlapped to get notification
     // of when data is available
     memset(&sockstate->ov_read, 0, sizeof(sockstate->ov_read));
+#ifdef USE_OPENSSL
+    sockstate->ov_read.hEvent = sockstate->read_event;
+#endif
 
     zreadbuf.buf = zreadchar;
     zreadbuf.len = 0;
@@ -488,6 +589,46 @@ int WSIOCP_QueueNextRead(int fd) {
     return 0;
 }
 
+#ifdef USE_OPENSSL
+int WSIOCP_SuspendRead(iocpSockState *state, int timeout_ms) {
+    DWORD transferred = 0, flags = 0;
+    if (state->read_suspended || (state->masks & (CLOSE_PENDING | CONNECT_PENDING))) {
+        errno = EBUSY;
+        return -1;
+    }
+    state->read_suspended = 1;
+    if (!(state->masks & READ_QUEUED)) return 0;
+    if (!state->read_event) {
+        errno = EINVAL;
+        goto error;
+    }
+    if (FDAPI_CancelSocketIO(state->fd, &state->ov_read) != 0) goto error;
+    DWORD waited = WaitForSingleObject(state->read_event,
+        timeout_ms < 0 ? INFINITE : (DWORD)timeout_ms);
+    if (waited != WAIT_OBJECT_0) {
+        if (waited == WAIT_TIMEOUT) errno = ETIMEDOUT;
+        else set_errno_from_last_error();
+        goto error;
+    }
+    if (!FDAPI_WSAGetOverlappedResult(state->fd, &state->ov_read,
+                                    &transferred, FALSE, &flags) &&
+        FDAPI_WSAGetLastError() != ERROR_OPERATION_ABORTED) goto error;
+    /* READ_QUEUED remains set. Only the matching normal dequeue may clear it,
+     * including when cancellation completed before we started waiting. */
+    return 0;
+error:
+    state->read_suspended = 0;
+    return -1;
+}
+
+int WSIOCP_ResumeRead(iocpSockState *state) {
+    state->read_suspended = 0;
+    if (!(state->masks & CLOSE_PENDING) && (state->masks & AE_READABLE))
+        return WSIOCP_QueueNextRead(state->fd);
+    return 0;
+}
+#endif
+
 /* Queue a synthetic completion only after Winsock reports real write
  * readiness.  A backpressured socket is marked for the event loop's bounded
  * retry instead of posting an immediate completion that would busy-loop. */
@@ -504,7 +645,8 @@ int WSIOCP_QueueWriteReady(int fd) {
         WSIOCP_ClearWriteRearmNeeded(sockstate);
         return 0;
     }
-    if (sockstate->completion_port == NULL) {
+    if (sockstate->completion_port == NULL || sockstate->loop == NULL ||
+        !sockstate->loop->active) {
         WSIOCP_ClearWriteRearmNeeded(sockstate);
         errno = EINVAL;
         return -1;
@@ -792,17 +934,37 @@ int WSIOCP_SocketConnectBind(int fd, const SOCKADDR_STORAGE *socketAddrStorage, 
     return 0;
 }
 
-void WSIOCP_Init(HANDLE iocp) {
-    if (iocph == NULL) {
-        iocph = iocp;
-        InterlockedExchange(&acceptRearmPending, 0);
-        InterlockedExchange(&writeRearmPending, 0);
-    }
-    FDAPI_SetCloseSocketState(WSIOCP_CloseSocketStateRFD);
+iocpLoopState *WSIOCP_Init(HANDLE iocp) {
+    iocpLoopState *loop = CallocMemoryNoCOW(sizeof(*loop));
+    if (loop == NULL) return NULL;
+    loop->port = iocp;
+    loop->refs = 1;
+    loop->active = 1;
+    AcquireSRWLockExclusive(&loopLock);
+    loop->next = loops;
+    loops = loop;
+    if (iocph == NULL) iocph = iocp;
+    ReleaseSRWLockExclusive(&loopLock);
+    InitOnceExecuteOnce(&closeHookOnce, WSIOCP_InitializeCloseHook, NULL, NULL);
+    return loop;
 }
 
-void WSIOCP_Cleanup(HANDLE iocp) {
-    if (iocph == iocp) iocph = NULL;
+void WSIOCP_Cleanup(iocpLoopState *loop) {
+    iocpLoopState **entry;
+    AcquireSRWLockExclusive(&loopLock);
+    for (entry = &loops; *entry != NULL; entry = &(*entry)->next) {
+        if (*entry == loop) {
+            *entry = loop->next;
+            break;
+        }
+    }
+    InterlockedExchange(&loop->active, 0);
+    if (iocph == loop->port) iocph = loops != NULL ? loops->port : NULL;
+    ReleaseSRWLockExclusive(&loopLock);
+    /* Close callbacks and retained completions may arrive after teardown.
+     * Their counters stay owned by this retired loop, even if Windows reuses
+     * its HANDLE for a new completion port. */
+    WSIOCP_ReleaseLoop(loop);
 }
 
 static HANDLE privateheap;

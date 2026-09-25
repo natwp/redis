@@ -1,4 +1,14 @@
 Redis for Windows - https://github.com/natwp/redis
+
+2026-09-22: Redis 7.2.16 Windows core revision 2
+
+Add validated processor-group CPU affinity, client ASLR, and loop-owned IOCP
+retry accounting with retained completion ownership. Preserve the bundled
+allocator, QFork server image, plaintext core package, and single-threaded
+client I/O. Source-declared revisions bind packaging and qualification to the
+exact source; publication requires fresh CI evidence for all maintained lines.
+
+--------------------------------------------------------
 ========================================================
 
 This file provides information about Windows-specific changes to Redis.

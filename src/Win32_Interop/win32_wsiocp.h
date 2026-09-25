@@ -25,6 +25,7 @@
 
 #include "win32_wsiocp2.h"
 #include "../ae.h"
+#include "../adlist.h"
 
  /* structs and functions for using IOCP with windows sockets */
 
@@ -49,11 +50,15 @@ typedef struct aacceptreq {
     struct aacceptreq *next;
 } aacceptreq;
 
+/* Retry accounting outlives an event loop while sockets still retain it. */
+typedef struct iocpLoopState iocpLoopState;
+
 /* per socket information */
 typedef struct iocpSockState {
     int masks;
     int fd;
     HANDLE completion_port;
+    iocpLoopState *loop;
     aacceptreq *reqs;
     aacceptreq *accept_pending;
     int wreqs;
@@ -61,6 +66,11 @@ typedef struct iocpSockState {
     int accept_rearm_logged;
     int write_rearm_logged;
     int deferred_error;
+#ifdef USE_OPENSSL
+    HANDLE read_event;
+    int read_suspended;
+    int plaintext_only;
+#endif
     OVERLAPPED ov_read;
     list wreqlist;
     int unknownComplete;
@@ -75,8 +85,8 @@ typedef struct iocpSockState {
 #define ACCEPT_REARM_NEEDED 0x008000
 #define WRITE_REARM_NEEDED  0x010000
 
-void           WSIOCP_Init(HANDLE iocp);
-void           WSIOCP_Cleanup(HANDLE iocp);
+iocpLoopState* WSIOCP_Init(HANDLE iocp);
+void           WSIOCP_Cleanup(iocpLoopState *loop);
 iocpSockState* WSIOCP_GetExistingSocketState(int fd);
 iocpSockState* WSIOCP_GetSocketState(int fd);
 int            WSIOCP_SocketAttach(int fd, iocpSockState *socketState);
@@ -88,8 +98,12 @@ void           WSIOCP_RetainSocketState(iocpSockState *socketState);
 void           WSIOCP_ReleaseSocketState(iocpSockState *socketState);
 BOOL           WSIOCP_TryFinalizeClosedState(iocpSockState *socketState);
 void           WSIOCP_DisposeAcceptRequest(aacceptreq *request);
-BOOL           WSIOCP_AcceptRearmPending(void);
-BOOL           WSIOCP_WriteRearmPending(void);
+BOOL           WSIOCP_AcceptRearmPending(iocpLoopState *loop);
+BOOL           WSIOCP_WriteRearmPending(iocpLoopState *loop);
+#ifdef USE_OPENSSL
+int            WSIOCP_SuspendRead(iocpSockState *socketState, int timeout_ms);
+int            WSIOCP_ResumeRead(iocpSockState *socketState);
+#endif
 
 
 void* CallocMemoryNoCOW(size_t size);
