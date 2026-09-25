@@ -13,9 +13,8 @@ to configure in GitHub settings.
   Sentinel, and Module API suites; interop; the elevated service/Event Log
   test; package extraction, license, PE/import and resource checks; packaged
   replication; and a 30-minute QFork persistence soak.
-- A release dispatch takes an exact 40-character tip SHA. Before Windows
-  qualification is called for that SHA, the workflow verifies that it was
-  dispatched from that same canonical branch and exact commit, then verifies
+- A release dispatch takes an exact 40-character tip SHA. The workflow reuses the successful canonical push qualification for that
+  SHA. It verifies the dispatch source, then verifies
   that every one of the five maintained branch tips has a successful
   full-qualification run. No release is published while one line is stale or
   failing.
@@ -36,6 +35,16 @@ least one approving review, required passing PR smoke checks, and no force push
 after the first public release.
 
 ## Package and evidence contract
+
+Each branch declares its positive Windows revision in
+`packaging/mingw/windows-revision`. Packaging and automatic qualification read
+that file from the exact selected source. Optional revision inputs are
+assertions and must match it. A new upstream version starts at revision 1;
+changed Windows packages for an existing upstream version increment the
+revision. Publication validates the requested tag and revision against source
+metadata, then validates archive identity before attestation and publication.
+Redis 8 candidates require static OpenSSL provenance and both plaintext and
+TLS evidence. Earlier maintained lines require plaintext evidence.
 
 Packages are built only in GitHub Actions. Qualification performs one clean
 MinGW64 build, strips the candidate before any source-tree suite runs, stages

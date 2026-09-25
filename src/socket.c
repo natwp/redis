@@ -85,6 +85,13 @@ static connection *connCreateAcceptedSocket(struct aeEventLoop *el, int fd, void
     connection *conn = connCreateSocket(el);
     conn->fd = fd;
     conn->state = CONN_STATE_ACCEPTING;
+#if defined(_WIN32) && defined(USE_OPENSSL)
+    /* An accepted Redis TCP connection keeps this transport for its lifetime. */
+    if (WSIOCP_SetPlaintextOnly(fd) < 0) {
+        conn->last_errno = errno;
+        conn->state = CONN_STATE_ERROR;
+    }
+#endif
     return conn;
 }
 
@@ -378,8 +385,8 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
         if (conn->fd != -1 && conn->read_handler &&
             conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
             if (WSIOCP_QueueNextRead(conn->fd) != 0) {
-                if (!connSocketRearmFailed(conn, conn->read_handler, "read"))
-                    return;
+                connSocketRearmFailed(conn, conn->read_handler, "read");
+                return;
             }
         }
 #endif
@@ -391,8 +398,8 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
         if (conn->fd != -1 && conn->write_handler &&
             conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
             if (WSIOCP_QueueWriteReady(conn->fd) != 0) {
-                if (!connSocketRearmFailed(conn, conn->write_handler, "write"))
-                    return;
+                connSocketRearmFailed(conn, conn->write_handler, "write");
+                return;
             }
         }
 #endif
@@ -405,8 +412,8 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
         if (conn->fd != -1 && conn->read_handler &&
             conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
             if (WSIOCP_QueueNextRead(conn->fd) != 0) {
-                if (!connSocketRearmFailed(conn, conn->read_handler, "read"))
-                    return;
+                connSocketRearmFailed(conn, conn->read_handler, "read");
+                return;
             }
         }
 #endif

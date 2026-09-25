@@ -24,9 +24,9 @@ proc write_included_conf {dir port inner_lines} {
     close $fd
 
     set fd [open $dir/main.conf w]
-    puts $fd "include $dir/inner.conf"
+    puts $fd "include \"$dir/inner.conf\""
     puts $fd "port $port"
-    puts $fd "dir $dir"
+    puts $fd "dir \"$dir\""
     close $fd
 }
 
@@ -34,11 +34,9 @@ tags {external:skip cluster} {
 
     test {cluster-bus-port-protected-mode yes refuses an unauthenticated bus} {
         # No config file at all, so nothing the suite configures interferes.
-        # "--daemonize yes" only matters if this check ever regresses: the server
-        # would then start instead of failing, and exec would return at once
-        # instead of blocking forever.
-        catch {exec src/redis-server --cluster-enabled yes --port 0 \
-            --cluster-bus-port-protected-mode yes --daemonize yes} err
+        # The startup-error helper bounds the process lifetime on Windows.
+        set err [redis_server_startup_error --cluster-enabled yes --port 0 \
+            --cluster-bus-port-protected-mode yes]
         assert_match {*FATAL CONFIG FILE ERROR*} $err
         assert_match {*cluster-bus-port-protected-mode is enabled but tls-cluster is disabled*} $err
         assert_match {*'cluster-bus-port-protected-mode no'*} $err
@@ -51,33 +49,45 @@ tags {external:skip cluster} {
         # before the rest of the parent file has been parsed. start_server cannot
         # be used here: it generates the config file itself and offers no way to
         # place directives behind an include.
-        set dir [file normalize [tmpdir cluster-bus-include]]
+        set relative_dir [tmpdir cluster-bus-include]
+        set dir [file normalize $relative_dir]
         set logf $dir/redis.log
         set port [find_available_port $::baseport $::portcount]
 
         # cluster mode arrives via the include: the node does open a cluster bus,
         # so protection must still refuse an unauthenticated one.
         write_included_conf $dir $port {"cluster-enabled yes" "cluster-bus-port-protected-mode yes"}
-        catch {exec src/redis-server $dir/main.conf --daemonize yes} err
+        set err [redis_server_startup_error $relative_dir/main.conf]
         assert_match {*cluster-bus-port-protected-mode is enabled but tls-cluster is disabled*} $err
 
         # And the waiver arrives via the include too: it is honoured, and the
         # node starts with an unauthenticated bus.
         write_included_conf $dir $port {"cluster-enabled yes" "cluster-bus-port-protected-mode no"}
-        exec src/redis-server $dir/main.conf --daemonize yes --logfile $logf
-        wait_for_condition 100 100 {
-            [count_message_lines $logf "Ready to accept"] > 0
-        } else {
-            fail "Server did not start; log: $logf"
+        set pid [spawn_server $relative_dir/main.conf $dir/stdout $dir/stderr \
+            [list --daemonize no --logfile $logf]]
+        set rd {}
+        try {
+            wait_for_condition 100 100 {
+                [count_message_lines $logf "Ready to accept"] > 0
+            } else {
+                fail "Server did not start; log: $logf"
+            }
+            # This manually configured server uses plaintext even in a TLS run.
+            set rd [redis 127.0.0.1 $port 0 0]
+            assert_equal {cluster-bus-port-protected-mode no} [$rd config get cluster-bus-port-protected-mode]
+            assert_equal 1 [status $rd cluster_enabled]
+            assert_equal 1 [count_message_lines $logf "cluster bus port is not authenticated"]
+        } finally {
+            if {$rd ne {}} {
+                catch {$rd shutdown nosave}
+                catch {$rd close}
+            }
+            for {set attempt 0} {$attempt < 100 && [process_is_alive $pid]} {incr attempt} {
+                after 10
+            }
+            if {[process_is_alive $pid]} { kill_proc2 $pid }
+            send_data_packet $::test_server_fd server-killed $pid
         }
-        # Connect over the plain port: this server knows nothing about the
-        # suite's TLS configuration, in a --tls run just as much as without it.
-        set rd [redis 127.0.0.1 $port 0 0]
-        assert_equal {cluster-bus-port-protected-mode no} [$rd config get cluster-bus-port-protected-mode]
-        assert_equal 1 [status $rd cluster_enabled]
-        assert_equal 1 [count_message_lines $logf "cluster bus port is not authenticated"]
-        catch {$rd shutdown nosave}
-        $rd close
     }
 
     # A standalone instance opens no cluster bus port, so protection must not

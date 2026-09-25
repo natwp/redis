@@ -1,26 +1,40 @@
-# Redis 8.10.1 core behavior and upgrade guide for Windows
+# Redis 8.10.2 core behavior and upgrade guide for Windows
 
 ## Scope and prospective release identity
 
-This guide describes the unofficial Redis 8.10.1 Windows x64 MinGW port. The
-Redis core baseline is the exact upstream Redis 8.10.1 tag at commit
-`3399357e7c17b668289386b8a15a3037bc4527b1`, integrated with this fork's IOCP
+This guide describes the unofficial Redis 8.10.2 Windows x64 MinGW port. The
+Redis core baseline is the exact upstream Redis 8.10.2 tag at commit
+`498ecd0d6d007db11ddb3aea9428552598a78622`, integrated with this fork's IOCP
 networking, FDAPI descriptors, QFork persistence, Windows service, Event Log,
 console, and MinGW64 layers.
 
 If CI later promotes this source, the expected package naming is:
 
 - canonical branch: `mingw-8.10`;
-- package revision tag: `v8.10.1-windows.1`;
-- portable archive: `Redis-x64-8.10.1-mingw-r1.zip`; and
-- adjacent checksum: `Redis-x64-8.10.1-mingw-r1.zip.sha256`.
+- package revision tag: `v8.10.2-windows.1`;
+- portable archive: `Redis-x64-8.10.2-mingw-r1.zip`; and
+- adjacent checksum: `Redis-x64-8.10.2-mingw-r1.zip.sha256`.
 
 No public tag or archive is created during this pre-publish phase. A future CI
 release must write `BUILDINFO.txt` with the exact source commit and tree, then
 verify that the tag, archive, checksum, contents, and tested extraction agree.
 A changed Windows package requires a new revision. Revision 1 combines the
-completed Windows portability hardening with the upstream 8.10.1 security and
+completed Windows portability hardening with the upstream 8.10.2 security and
 correctness fixes. The imported upstream ancestry is retained in Git history.
+
+### Security and Windows maintenance in this candidate
+
+The 8.10.2 import rechecks queued-command key permissions at EXEC and preserves
+module command-filter cache invalidation. Cluster bus protection is controlled
+by `cluster-bus-port-protected-mode`, whose upstream default is `no`. Setting
+it to `yes` requires `tls-cluster`; cluster peers must present certificates
+even when client-port certificate authentication is optional.
+
+This Windows revision enables the qualified static TLS implementation,
+processor-group CPU affinity, and client ASLR. Deferred IOCP accept/write
+retries are accounted for by their owning event loop, including late close
+and teardown, while preserving the 100 ms accept cadence, 10 ms write cadence,
+64-writer batches, and plaintext cancellation-event optimization.
 
 ### Post-release source maintenance
 
@@ -38,7 +52,7 @@ package qualification matrix.
 
 ## Core-only distribution
 
-This archive is Redis 8.10.1 core only. It does not build or ship the bundled
+This archive is Redis 8.10.2 core only. It does not build or ship the bundled
 Redis Search, JSON, TimeSeries, probabilistic, or Vector Sets modules included
 with the full upstream Redis 8 distribution. Those components have independent
 build systems, worker-thread behavior, persistence paths, dependencies, and
@@ -69,7 +83,7 @@ Binary redistribution must preserve:
 - `REDISCONTRIBUTIONS.txt`;
 - `WINDOWS-NOTICES.txt`;
 - `THIRD-PARTY-NOTICES.txt`;
-- the Zstandard, CC0, GCC Runtime Library Exception, GPLv3, and MinGW-w64
+- the OpenSSL, Zstandard, CC0, GCC Runtime Library Exception, GPLv3, and MinGW-w64
   companion texts;
 - this guide, the Windows release notes, and BUILDINFO; and
 - access to the exact corresponding source revision.
@@ -78,6 +92,9 @@ The MinGW server statically links Zstandard from the MSYS2 MinGW64 package
 resolved by the release workflow. `BUILDINFO.txt` records the exact package
 version. The executable does not import a Zstandard DLL, but its BSD license
 remains part of the binary redistribution payload.
+The standard build also statically links OpenSSL 3, records its version and
+MSYS2 package in BUILDINFO, and includes its Apache 2.0 license as
+`OPENSSL-LICENSE.txt`.
 The existing fast_float, TRE, xxHash, hiredis, jemalloc, Lua, HdrHistogram,
 fpconv, linenoise, CRC, hash, and toolchain notices are reproduced in
 `THIRD-PARTY-NOTICES.txt`. This guide records engineering scope and is not
@@ -88,11 +105,14 @@ legal advice.
 | Area | Upstream Linux/POSIX behavior | This Windows core package |
 | --- | --- | --- |
 | Event loop | epoll, kqueue, or another POSIX backend | IOCP with synthetic FDAPI descriptors and one-shot readiness rearming |
-| Network transports | TCP, Unix sockets, and optional TLS | Plain TCP over IPv4/IPv6; Unix sockets and TLS are unsupported |
+| Network transports | TCP, Unix sockets, and optional TLS | TCP and native TLS over IPv4/IPv6; Unix sockets are unsupported |
 | Client I/O threads | Multiple read/write I/O threads may be configured | Exactly one client I/O thread is enforced |
-| Replication compression | Requires multiple client I/O threads | Compiled with static Zstandard but must remain disabled |
+| Replication compression | Requires multiple client I/O threads | Compiled with static Zstandard; startup rejects nonzero `repl-compression` |
 | Background persistence | fork copy-on-write child | QFork starts a Windows child and restores the tracked heap at matching addresses |
-| Executable layout | Normal PIE/ASLR conventions | Dynamic-base and high-entropy ASLR are disabled for QFork address stability |
+| Diskless replication | Streams a full synchronization directly to replicas | Supported through QFork; the Windows examples default to disk-backed synchronization |
+| Active defragmentation | Uses allocator hooks to relocate objects | Supported by the customized jemalloc allocator |
+| CPU affinity | CPU lists select processors for server and worker threads | Strict thread affinity within one Windows processor group per list |
+| Executable layout | Normal PIE/ASLR conventions | CLI and benchmark enable dynamic-base/high-entropy ASLR, NX, and relocations; server and its aliases keep ASLR disabled for QFork |
 | Service integration | daemon, systemd, or syslog conventions | Foreground console or Windows SCM service with Application Event Log support |
 | Native modules | ELF shared objects and POSIX fork assumptions | x64 PE DLLs; module-created fork children are unsupported |
 | Interactive CLI | POSIX terminal handling | Native Windows console input and ANSI translation; redirected input is a separate path |
@@ -116,25 +136,58 @@ reply protected by the connection barrier is written.
 
 The example configurations bind to `127.0.0.1` and keep protected mode
 enabled. Before adding non-loopback addresses, configure ACL authentication,
-firewall rules, and a trusted transport boundary. This package has no TLS
-listener, TLS replication, TLS Cluster link, or Unix-domain socket support.
-A TLS proxy or VPN is an external security component and must be assessed
-separately.
+firewall rules, and TLS settings. The standard MinGW build statically links
+OpenSSL 3 and supports native TLS listeners, CLI/benchmark and `rediss://`,
+replication (including diskless and dedicated RDB channels), Cluster links,
+and Sentinel command/Pub/Sub links. Runtime defaults remain ordinary TCP;
+configure certificates and `tls-port`, `tls-replication`, or `tls-cluster` to
+enable encryption for the required roles. `BUILD_TLS=no` builds an explicit
+plaintext-only variant. Unix-domain sockets remain unsupported.
 
-Startup rejects client `io-threads` values other than 1 and rejects
-`io-threads-do-reads yes`. Upstream Redis 8.10 replication compression requires
+TLS uses a shared FDAPI BIO and preserves IOCP completion ownership during
+synchronous operations. QFork children still serialize into the existing
+parent-owned replication pipe; SSL objects and network encryption remain in
+the parent. See WINDOWS-MINGW-README.md for native TLS tests, certificate path
+handling, renewal and peer-name verification.
+
+Startup rejects client `io-threads` values other than 1 and nonzero
+`repl-compression`. Upstream Redis 8.10 replication compression requires
 multiple client I/O threads, so keep these settings:
 
     io-threads 1
-    io-threads-do-reads no
     repl-compression 0
 
-Do not enable `repl-compression` merely because Zstandard is linked into the
-binary. It remains outside the qualified Windows runtime surface.
+`io-threads-do-reads` is deprecated and ignored in Redis 8.10, including when
+its value is `yes`. It does not enable additional Windows client I/O threads.
+Linking Zstandard does not enable replication compression in this port.
 
-Windows include paths are literal and do not support POSIX wildcard expansion.
-List every included configuration file explicitly and use paths writable by
-the intended console user or service account.
+Windows `include` paths support wildcard patterns, including wildcard directory
+components such as `C:/Redis/conf.d/*/redis.conf`. Matches are loaded in sorted
+order. An unmatched pattern is skipped; an explicit missing file or an
+unreadable match fails configuration loading. Included files must be readable
+by the intended console user or service account.
+
+## CPU affinity
+
+The immutable `server-cpulist`, `bio-cpulist`, `bgsave-cpulist`, and
+`aof-rewrite-cpulist` settings accept comma-separated CPU numbers, inclusive
+ranges, and stepped ranges, for example `0,2-6:2`. Their underscore aliases
+remain accepted. Unset or empty lists leave affinity unchanged.
+
+On Windows, a CPU number means `64 * processor-group + processor-index`.
+For example, CPU 65 is processor 1 in group 1, even if group 0 has fewer than
+64 active processors. Each list must select active processors within one
+group. Different lists may select different groups. Malformed lists, overflow,
+descending ranges, zero strides, inactive CPUs, and selections spanning groups
+fail startup before Redis creates its workers.
+
+`server-cpulist` applies to the main thread, `bio-cpulist` to each BIO worker,
+`bgsave-cpulist` to the QFork BGSAVE and diskless-save worker, and
+`aof-rewrite-cpulist` to the QFork AOF-rewrite worker. The port uses
+`SetThreadGroupAffinity` for strict thread affinity and resolves topology in
+each process. It does not impose these settings on unrelated internal threads.
+If Windows refuses an otherwise valid request, Redis logs the list and Windows
+error, retains the thread's existing affinity, and continues.
 
 ## Windows text, naming, and filesystem contract
 
@@ -191,15 +244,26 @@ pages, and runs the upstream child operation. The package therefore keeps the
 customized `jemalloc-5.3.0-redis` allocator and fixed-address executable
 constraints.
 
+The CLI and benchmark do not use QFork. Their executables enable dynamic-base
+and high-entropy ASLR, NX compatibility, and base relocations. Standalone test
+executables use the same policy. The server retains NX compatibility with ASLR
+disabled, and Sentinel and the RDB/AOF checkers remain byte-identical copies of
+that server image. The shared PE hardening check runs on local build directories
+and extracted CI packages; package integrity, import, and stripping checks
+remain part of full CI qualification.
+
 Allow enough Windows commit/pagefile capacity for the parent, child, copied
 pages, output buffers, compact-hash templates, and workload churn. Memory
 pressure can fail a background operation even when the parent remains
 responsive. Monitor Redis persistence status and Windows commit usage; do not
 disable the pagefile for a QFork deployment without workload-specific evidence.
 
-The examples retain disk-backed replication synchronization. Diskless
-replication is not the default Windows contract and requires separate workload
-qualification. For AOF deployments, preserve the complete append-only
+The examples retain disk-backed replication synchronization. Diskless full
+synchronization is implemented through QFork and covered by the Windows
+replication tests. Active defragmentation is also implemented using the
+customized jemalloc hooks and covered by the source tests. Qualify both against
+the intended memory, persistence, module, and network workload before changing
+deployment settings. For AOF deployments, preserve the complete append-only
 directory and manifest together. Use the packaged checkers before recovery:
 
     redis-check-rdb.exe dump.rdb

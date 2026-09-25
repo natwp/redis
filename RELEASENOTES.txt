@@ -1,4 +1,41 @@
 Redis for Windows - https://github.com/natwp/redis
+
+2026-09-21: Redis 8.10.2 Windows core revision 1
+
+Import the upstream queued-command ACL and cluster bus security fixes. The
+new cluster-bus-port-protected-mode option defaults to no, as upstream;
+enabling it requires tls-cluster. Cluster peers must present certificates
+independently of the client-port tls-auth-clients setting.
+
+This candidate includes the qualified static TLS transport, processor-group
+CPU affinity and client ASLR. IOCP accept/write retry accounting belongs to
+the owning event loop and remains safe through delayed close and teardown.
+Plaintext sockets retain the qualified cancellation-event optimization.
+
+The Windows package revision is declared in packaging/mingw/windows-revision.
+Qualification, packaging, evidence and publication reject conflicting revision
+inputs and reuse the exact tested archive. Release candidates require fresh
+Windows qualification; historical qualification does not qualify this source.
+
+--------------------------------------------------------
+
+2026-09-13: Native TLS for the MinGW 8.10 core build
+
+The standard build now includes static OpenSSL 3 with BUILD_TLS=yes; an
+explicit BUILD_TLS=no build remains available. TLS covers clients, tools,
+replication (including diskless and dedicated RDB channels), Cluster and
+Sentinel. Runtime defaults remain plaintext until TLS is configured. Windows
+client I/O remains single-threaded and replication compression disabled.
+
+Server and hiredis share a synthetic-descriptor BIO. Synchronous transitions
+acknowledge their own IOCP read cancellation while retaining completion and
+descriptor ownership until normal dequeue. QFork encryption stays in the
+parent. Qualification runs both plaintext and TLS suites against one stripped
+package, including package/service checks and a persistence soak per transport.
+OpenSSL version, package, static linkage and license accompany the package and
+SBOM. Earlier no-TLS scope statements below describe historical releases.
+
+--------------------------------------------------------
 ========================================================
 
 This file provides information about Windows-specific changes to Redis.

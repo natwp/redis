@@ -48,6 +48,7 @@ sGetQueuedCompletionStatusEx pGetQueuedCompletionStatusEx;
 /* Structure that keeps state of sockets and Completion port handle */
 typedef struct aeApiState {
     HANDLE iocp;
+    iocpLoopState *loop;
     int setsize;
     ULONGLONG next_accept_rearm_ms;
     ULONGLONG next_accept_ready_ms;
@@ -98,9 +99,14 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
                                &pGetQueuedCompletionStatusEx,
                                sizeof(pGetQueuedCompletionStatusEx));
 
+    state->loop = WSIOCP_Init(state->iocp);
+    if (state->loop == NULL) {
+        CloseHandle(state->iocp);
+        FreeMemoryNoCOW(state);
+        return -1;
+    }
     state->setsize = eventLoop->setsize;
     eventLoop->apidata = state;
-    WSIOCP_Init(state->iocp);
     return 0;
 }
 
@@ -112,7 +118,7 @@ static int aeApiResize(aeEventLoop *eventLoop, int setsize) {
 /* Termination */
 static void aeApiFree(aeEventLoop *eventLoop) {
     aeApiState *state = (aeApiState *) eventLoop->apidata;
-    WSIOCP_Cleanup(state->iocp);
+    WSIOCP_Cleanup(state->loop);
     CloseHandle(state->iocp);
     FreeMemoryNoCOW(state);
 }
@@ -126,7 +132,7 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
         return -1;
     }
     if (sockstate->masks & SOCKET_ATTACHED) {
-        if (sockstate->completion_port != state->iocp) {
+        if (sockstate->completion_port != state->iocp || sockstate->loop != state->loop) {
             errno = EINVAL;
             return -1;
         }
@@ -215,7 +221,7 @@ static int aeApiFireEvent(aeEventLoop *eventLoop, iocpSockState *sockstate,
                           int fd, int mask) {
     aeApiState *state = (aeApiState *) eventLoop->apidata;
     if (fd < 0 || fd >= state->setsize ||
-        sockstate->completion_port != state->iocp) return 0;
+        sockstate->completion_port != state->iocp || sockstate->loop != state->loop) return 0;
     WSIOCP_RetainSocketState(sockstate);
     eventLoop->fired[0].fd = fd;
     eventLoop->fired[0].mask = mask;
@@ -241,6 +247,7 @@ static int aeApiFireQueuedAccept(aeEventLoop *eventLoop) {
         int fd = (state->accept_ready_cursor + offset) % count;
         iocpSockState *sockstate = WSIOCP_GetExistingSocketState(fd);
         if (sockstate == NULL || sockstate->completion_port != state->iocp ||
+            sockstate->loop != state->loop ||
             sockstate->reqs == NULL ||
             (sockstate->masks & (LISTEN_SOCK | AE_READABLE)) !=
                 (LISTEN_SOCK | AE_READABLE) ||
@@ -265,7 +272,7 @@ static int aeApiProcessCompletion(aeEventLoop *eventLoop,
         aeApiUnknownCompletion(NULL, rfd);
         return 0;
     }
-    if (sockstate->completion_port != state->iocp) {
+    if (sockstate->completion_port != state->iocp || sockstate->loop != state->loop) {
         /* A descriptor was recycled after a completion had already been
          * queued to its former owner's port.  Never apply that packet to the
          * new socket state. */
@@ -411,7 +418,7 @@ static int aeApiProcessCompletion(aeEventLoop *eventLoop,
 
 static void aeApiRetryAccepts(aeEventLoop *eventLoop) {
     aeApiState *state = (aeApiState *)eventLoop->apidata;
-    if (!WSIOCP_AcceptRearmPending()) {
+    if (!WSIOCP_AcceptRearmPending(state->loop)) {
         state->next_accept_rearm_ms = 0;
         return;
     }
@@ -424,6 +431,7 @@ static void aeApiRetryAccepts(aeEventLoop *eventLoop) {
     for (int fd = 0; fd <= eventLoop->maxfd; fd++) {
         iocpSockState *sockstate = WSIOCP_GetExistingSocketState(fd);
         if (sockstate == NULL || sockstate->completion_port != state->iocp ||
+            sockstate->loop != state->loop ||
             (sockstate->masks & ACCEPT_REARM_NEEDED) == 0 ||
             (sockstate->masks & CLOSE_PENDING) != 0)
             continue;
@@ -447,7 +455,7 @@ static void aeApiRetryAccepts(aeEventLoop *eventLoop) {
  * completion consumed by this backend. */
 static int aeApiRetryWrites(aeEventLoop *eventLoop) {
     aeApiState *state = (aeApiState *)eventLoop->apidata;
-    if (!WSIOCP_WriteRearmPending()) {
+    if (!WSIOCP_WriteRearmPending(state->loop)) {
         state->next_write_rearm_ms = 0;
         return 0;
     }
@@ -474,6 +482,7 @@ static int aeApiRetryWrites(aeEventLoop *eventLoop) {
         int fd = (state->write_rearm_cursor + offset) % fd_count;
         iocpSockState *sockstate = WSIOCP_GetExistingSocketState(fd);
         if (sockstate == NULL || sockstate->completion_port != state->iocp ||
+            sockstate->loop != state->loop ||
             (sockstate->masks & WRITE_REARM_NEEDED) == 0 ||
             (sockstate->masks & CLOSE_PENDING) != 0)
             continue;
@@ -525,8 +534,10 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp,
     eventLoop->fired[0].backend_data = NULL;
     if (aeApiFireQueuedAccept(eventLoop)) return 1;
     if (aeApiRetryWrites(eventLoop)) return 1;
-    if (WSIOCP_WriteRearmPending() && first_timeout > 10)
+    if (WSIOCP_WriteRearmPending(state->loop) && first_timeout > 10)
         first_timeout = 10;
+    if (WSIOCP_AcceptRearmPending(state->loop) && first_timeout > 100)
+        first_timeout = 100;
     int attempt = 0;
     while (*completion_budget > 0) {
         OVERLAPPED_ENTRY entry;
@@ -545,6 +556,7 @@ static int aeApiFiredEventValid(aeEventLoop *eventLoop, aeFiredEvent *event) {
     return expected != NULL &&
            WSIOCP_GetExistingSocketState(event->fd) == expected &&
            expected->completion_port == state->iocp &&
+           expected->loop == state->loop &&
            (expected->masks & CLOSE_PENDING) == 0;
 }
 
