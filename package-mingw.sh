@@ -22,6 +22,7 @@ done
 
 required_manifest_files=(
     src/version.h
+    packaging/mingw/windows-revision
     packaging/mingw/README.txt
     msvs/setups/documentation/redis.windows.conf
     msvs/setups/documentation/redis.windows-service.conf
@@ -54,11 +55,7 @@ if [[ ! -f "$windows_changes" ]]; then
     exit 1
 fi
 
-windows_revision="${WINDOWS_PACKAGE_REVISION:-1}"
-if [[ ! "$windows_revision" =~ ^[1-9][0-9]*$ ]]; then
-    echo "error: WINDOWS_PACKAGE_REVISION must be a positive integer" >&2
-    exit 1
-fi
+windows_revision="$(bash scripts/windows-package-revision.sh "$repo_root" "${WINDOWS_PACKAGE_REVISION:-}")"
 
 gcc_version="$(
     "$msys_bash" -l -c \
@@ -183,6 +180,7 @@ install -m 0644 "$windows_changes" "$stage_dir/$windows_changes"
 {
     printf 'Redis version: %s\n' "$version"
     printf 'Windows package revision: %s\n' "$windows_revision"
+    printf 'TLS build: no\n'
     printf 'Package scope: Redis core; no prebuilt third-party modules included\n'
     printf 'Source commit: %s\n' "$source_commit"
     printf 'Source tree: %s\n' "$source_tree"

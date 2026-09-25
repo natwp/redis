@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -30,6 +31,9 @@ int win32_secure_random_bytes(void *buffer, size_t length);
 int win32_get_proc_address(HMODULE module, const char *name,
                            void *function, size_t function_size);
 int win32_llp64_interop_test(void);
+int win32_iocp_interop_test(void);
+int win32_sentinel_interop_test(void);
+int win32_connection_interop_test(void);
 }
 
 static bool emulate_modern_windows = false;
@@ -55,6 +59,30 @@ bool IsWindowsVersionAtLeast(WORD major, WORD minor, WORD service_pack) {
 }
 
 extern "C" void serverLog(int, const char *, ...) {
+}
+
+extern "C" void _serverLog(int, const char *, ...) {
+}
+
+/* The connection fixture's synchronous I/O helpers measure elapsed time. */
+extern "C" long long mstime(void) {
+    return static_cast<long long>(GetTickCount64());
+}
+
+/* Redis 6.2 keeps these in debug.c, which depends on the full server. */
+extern "C" void _serverAssert(const char *expression, const char *file, int line) {
+    std::fprintf(stderr, "Assertion failed at %s:%d: %s\n", file, line, expression);
+    std::abort();
+}
+
+extern "C" void _serverPanic(const char *file, int line, const char *message, ...) {
+    std::fprintf(stderr, "Panic at %s:%d: ", file, line);
+    va_list args;
+    va_start(args, message);
+    std::vfprintf(stderr, message, args);
+    va_end(args);
+    std::fputc('\n', stderr);
+    std::abort();
 }
 
 extern "C" BOOL ParseAndPrintANSIString(HANDLE, LPCVOID, DWORD, LPDWORD) {
@@ -1061,6 +1089,9 @@ int main(int argc, char **argv) {
     test_eventloop_pipe();
     test_iocp_blocking_transition();
     test_socket_duplication();
+    failures += win32_iocp_interop_test();
+    failures += win32_sentinel_interop_test();
+    failures += win32_connection_interop_test();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d interop test(s) failed\n", failures);

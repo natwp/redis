@@ -63,6 +63,9 @@
 #ifdef _WIN32
 #include "ae_wsiocp.c"
 #include "Win32_Interop/Win32_Service.h"
+#ifndef NO_QFORKIMPL
+extern void serviceStopRequested(void);
+#endif
 #else
 #ifdef HAVE_EVPORT
 #include "ae_evport.c"
@@ -213,6 +216,17 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
     }
 }
 
+void aeSetFileEventBarrier(aeEventLoop *eventLoop, int fd, int barrier) {
+    if (fd < 0 || fd >= eventLoop->setsize) return;
+
+    aeFileEvent *fe = &eventLoop->events[fd];
+    if (!(fe->mask & AE_WRITABLE)) return;
+    if (barrier)
+        fe->mask |= AE_BARRIER;
+    else
+        fe->mask &= ~AE_BARRIER;
+}
+
 int aeGetFileEvents(aeEventLoop *eventLoop, int fd) {
     if (fd >= eventLoop->setsize) return 0;
     aeFileEvent *fe = &eventLoop->events[fd];
@@ -347,6 +361,40 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     return processed;
 }
 
+#ifdef _WIN32
+static void aeProcessFileEvent(aeEventLoop *eventLoop, int fd, int mask) {
+    if (fd < 0 || fd >= eventLoop->setsize) return;
+
+    aeFileEvent *fe = &eventLoop->events[fd];
+    int fired = 0;
+    int invert = fe->mask & AE_BARRIER;
+
+    if (!invert && fe->mask & mask & AE_READABLE) {
+        fe->rfileProc(eventLoop,fd,fe->clientData,mask);
+        fired++;
+        if (fd >= eventLoop->setsize) return;
+        fe = &eventLoop->events[fd];
+    }
+
+    if (fe->mask & mask & AE_WRITABLE) {
+        if (!fired || fe->wfileProc != fe->rfileProc) {
+            fe->wfileProc(eventLoop,fd,fe->clientData,mask);
+            fired++;
+        }
+    }
+
+    if (invert) {
+        if (fd >= eventLoop->setsize) return;
+        fe = &eventLoop->events[fd];
+        if ((fe->mask & mask & AE_READABLE) &&
+            (!fired || fe->wfileProc != fe->rfileProc))
+        {
+            fe->rfileProc(eventLoop,fd,fe->clientData,mask);
+        }
+    }
+}
+#endif
+
 /* Process every pending time event, then every pending file event
  * (that may be registered by time event callbacks just processed).
  * Without special flags the function sleeps until some file event
@@ -366,9 +414,9 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NO_QFORKIMPL)
     if (ServiceStopIssued() == TRUE) {
-        aeStop(eventLoop);
+        serviceStopRequested();
     }
 #endif
 
@@ -381,7 +429,9 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * to fire. */
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
+#ifndef _WIN32
         int j;
+#endif
         struct timeval tv, *tvp;
         int64_t usUntilTimer = -1;
 
@@ -413,6 +463,60 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         if (eventLoop->beforesleep != NULL && flags & AE_CALL_BEFORE_SLEEP)
             eventLoop->beforesleep(eventLoop);
 
+#ifdef _WIN32
+        /* IOCP returns one completion per backend poll.  Snapshot the fired
+         * token before afterSleep(), which may re-enter and overwrite the
+         * shared eventLoop->fired[0] slot. */
+        int completion_budget = AE_WIN32_MAX_EVENTS_PER_POLL;
+        int stop_completion_drain = 0;
+        numevents = aeApiPoll(eventLoop, tvp, &completion_budget);
+        aeFiredEvent fired_event;
+        int have_fired_event = numevents > 0;
+        if (have_fired_event) fired_event = eventLoop->fired[0];
+
+        if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
+            eventLoop->aftersleep(eventLoop);
+
+        if (have_fired_event) {
+            if (flags & AE_FILE_EVENTS) {
+                if (aeApiFiredEventValid(eventLoop, &fired_event)) {
+                    /* IOCP reports read and write readiness as separate
+                     * completions.  Once a barriered read is dispatched, end
+                     * this batch so beforeSleep() can persist its effects
+                     * before any queued write completion sends the reply. */
+                    stop_completion_drain =
+                        (fired_event.mask & AE_READABLE) &&
+                        (eventLoop->events[fired_event.fd].mask & AE_BARRIER);
+                    aeProcessFileEvent(eventLoop, fired_event.fd, fired_event.mask);
+                }
+                processed++;
+            }
+            aeApiReleaseFiredEvent(&fired_event);
+        }
+
+        /* Drain visible completions without repeating the before/after-sleep
+         * hooks.  All polls share one raw-completion budget so internal and
+         * visible packets cannot multiply into an unbounded timer delay. */
+        int visible_events = have_fired_event && (flags & AE_FILE_EVENTS);
+        while ((flags & AE_FILE_EVENTS) &&
+               !stop_completion_drain &&
+               visible_events < AE_WIN32_MAX_EVENTS_PER_POLL &&
+               completion_budget > 0 &&
+               !eventLoop->stop) {
+            struct timeval zero = {0, 0};
+            if (aeApiPoll(eventLoop, &zero, &completion_budget) == 0) break;
+            fired_event = eventLoop->fired[0];
+            if (aeApiFiredEventValid(eventLoop, &fired_event)) {
+                stop_completion_drain =
+                    (fired_event.mask & AE_READABLE) &&
+                    (eventLoop->events[fired_event.fd].mask & AE_BARRIER);
+                aeProcessFileEvent(eventLoop, fired_event.fd, fired_event.mask);
+            }
+            processed++;
+            visible_events++;
+            aeApiReleaseFiredEvent(&fired_event);
+        }
+#else
         /* Call the multiplexing API, will return only on timeout or when
          * some event fires. */
         numevents = aeApiPoll(eventLoop, tvp);
@@ -474,6 +578,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
             processed++;
         }
+#endif
     }
     /* Check time events */
     if (flags & AE_TIME_EVENTS)

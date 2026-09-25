@@ -39,6 +39,13 @@ typedef struct WSIOCP_Request {
 } WSIOCP_Request;
 
 int WSIOCP_QueueNextRead(int rfd);
+#ifdef USE_OPENSSL
+int WSIOCP_SetPlaintextOnly(int rfd);
+#endif
+int WSIOCP_QueueWriteReady(int rfd);
+void WSIOCP_CancelWriteReady(int rfd);
+void WSIOCP_SetDeferredError(int rfd, int error);
+int WSIOCP_TakeDeferredError(int rfd);
 int WSIOCP_QueueAccept(int rfd);
 int WSIOCP_EnsureAcceptQueued(int rfd);
 int WSIOCP_SocketSend(int rfd, char *buf, int len, void *eventLoop, void *client, void *data, void *proc);

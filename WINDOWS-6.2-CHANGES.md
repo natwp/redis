@@ -2,12 +2,12 @@
 
 ## Scope and identity
 
-This is an unofficial Windows x64 port of the Redis 6.2.23 core, based on
-upstream commit `24b87eb55a4`, combined with this fork's IOCP networking,
+This is an unofficial Windows x64 port of the Redis 6.2.24 core, based on
+upstream commit `bfb69472301cb656043d3cbba332b406ef1d885a`, combined with this fork's IOCP networking,
 QFork persistence, Windows service, Event Log, console, and MinGW64 packaging
 layers.
 
-The completed Windows line reports `6.2.23` through `INFO server`, executable
+The source line reports `6.2.24` through `INFO server`, executable
 `--version` output, module version APIs, RDB metadata, and portable package
 metadata. Internal artifact identifiers and checksums are intentionally kept
 outside the tracked source. A future public package must be rebuilt and
@@ -18,9 +18,34 @@ RESP2 remains the default protocol, so existing Redis 5 clients normally keep
 working. RESP3, ACLs, client-side caching, and other Redis 6 behavior are
 opt-in unless configured.
 
+## Windows revision 2 maintenance
+
+This candidate adds processor-group CPU affinity and enables dynamic-base,
+high-entropy ASLR, NX, and base relocations for the CLI, benchmark, and standalone
+test programs. The server, Sentinel, and checker aliases retain the fixed image
+layout required by the branch's bundled jemalloc and QFork implementation.
+
+IOCP retries are owned by each event loop through attachment, delayed close,
+and teardown. Accept retries retain their 100 ms cadence; blocked writes use
+a 10 ms cadence and fair batches of at most 64 sockets. Retained completion
+ownership prevents callbacks on closed or recycled descriptors, and connection
+write barriers preserve the AOF flush-before-reply contract.
+
+The startup-only CPU options are `server_cpulist`, `bio_cpulist`, `bgsave_cpulist`, `aof_rewrite_cpulist`.
+Each list must select available processors within one Windows processor group.
+Invalid lists fail before worker creation; refused Windows API calls are logged.
+This line preserves the underscore option names.
+
+`packaging/mingw/windows-revision` declares revision 2. Packaging, CI
+qualification, and release evidence reject conflicting revisions. The package
+remains plaintext and core only, with single-threaded Windows client I/O.
+Every final source tip requires fresh Windows qualification before publication.
+Redis 6.2 retains its original connection interfaces and POSIX event loop.
+Windows service stop uses the normal main-thread AOF/RDB shutdown path.
+
 ## Commands, protocol, and security
 
-Redis 6.2.23 rejects corrupt stream RDB and `RESTORE` payloads that assign the
+Redis 6.2.24 rejects corrupt stream RDB and `RESTORE` payloads that assign the
 same pending entry to multiple consumers. Enforcing one consumer per NACK
 prevents the shared pointer and use-after-free state fixed by this security
 maintenance release.
@@ -337,8 +362,8 @@ The flat x64 ZIP contains `redis-server.exe`, `redis-sentinel.exe`,
 examples, `README.txt`, `BUILDINFO.txt`, the license, release notes, and this
 behavior guide. A separate `.sha256` file provides an integrity checksum for a
 ZIP obtained from a trusted channel. The package script requires a clean
-worktree, Redis 6.2.23, Windows revision 1, and GCC 16.1.0; staged timestamps
-are normalized to the package-source commit.
+worktree and the source-declared Windows revision. BUILDINFO records the exact
+MSYS2 compiler and package versions; staged timestamps match the source commit.
 
 The MinGW support runtimes (`libgcc`, `libstdc++`, and winpthreads) are linked
 without external MinGW DLL dependencies. Normal Windows system DLLs, including
@@ -357,11 +382,11 @@ test modules and build-only validation binaries are not shipped.
   `io-threads 1` and `io-threads-do-reads no`.
 - General module fork APIs and asynchronous/forked Lua debugger sessions are
   unavailable.
-- POSIX daemon, systemd/upstart, Linux OOM-score, CPU-affinity, process-title,
+- POSIX daemon, systemd/upstart, Linux OOM-score, process-title,
   THP, and signal behavior does not map directly to Windows; use the Windows
   service and Event Log facilities.
-- QFork requires a stable virtual-address layout. The MinGW executables
-  intentionally disable dynamic-base and high-entropy ASLR at link time.
+- QFork requires a stable virtual-address layout. The server and its aliases
+  disable ASLR; the CLI, benchmark, and standalone test programs enable ASLR.
 - This is an unofficial port. Validate persistence, replication, modules,
   service permissions, antivirus policy, and performance under the exact
   Windows version and workload used in production.

@@ -54,6 +54,10 @@
 #define AE_CALL_BEFORE_SLEEP (1<<3)
 #define AE_CALL_AFTER_SLEEP (1<<4)
 
+#ifdef _WIN32
+#define AE_WIN32_MAX_EVENTS_PER_POLL 100
+#endif
+
 #define AE_NOMORE -1
 #define AE_DELETED_EVENT_ID -1
 
@@ -93,6 +97,9 @@ typedef struct aeTimeEvent {
 typedef struct aeFiredEvent {
     int fd;
     int mask;
+#ifdef _WIN32
+    void *backend_data; /* Retained IOCP owner until dispatch completes. */
+#endif
 } aeFiredEvent;
 
 /* State of an event based program */
@@ -117,6 +124,7 @@ void aeStop(aeEventLoop *eventLoop);
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData);
 void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask);
+void aeSetFileEventBarrier(aeEventLoop *eventLoop, int fd, int barrier);
 int aeGetFileEvents(aeEventLoop *eventLoop, int fd);
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,

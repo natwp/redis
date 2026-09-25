@@ -2456,7 +2456,6 @@ void readQueryFromClient(connection *conn) {
         c->pending_querybuf = sdscatlen(c->pending_querybuf,
                                         c->querybuf+qblen,nread);
     }
-    WIN32_ONLY(WSIOCP_QueueNextRead(conn->fd);)
     sdsIncrLen(c->querybuf,nread);
     c->lastinteraction = server.unixtime;
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;

@@ -90,3 +90,12 @@ Before the first public release, a repository administrator must:
 The release workflow itself rechecks the successful full-qualification run and
 current tip of all five maintained lines immediately before it creates a tag.
 It refuses to overwrite an existing release or use or move an existing tag.
+
+## Source-declared package revision
+
+`packaging/mingw/windows-revision` contains one positive integer. Packaging and
+automatic qualification resolve it from the selected source; an explicit
+revision must match. Redis 8 packages require static OpenSSL provenance and
+plaintext plus TLS results. Older lines retain explicit plaintext evidence.
+Release verification checks source version, revision, archive, BUILDINFO,
+manifest, binary identities, and SPDX checksums before attestation.

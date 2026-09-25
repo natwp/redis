@@ -28,6 +28,155 @@ set ::redis_check_aof_path [redis_test_binary REDIS_CHECK_AOF {src redis-check-a
 set ::redis_check_rdb_path [redis_test_binary REDIS_CHECK_RDB {src redis-check-rdb}]
 set ::redis_test_launcher_path [redis_test_binary REDIS_TEST_LAUNCHER {build mingw64 redis-test-launcher}]
 
+proc redis_server_startup_error {args} {
+    if {$::tcl_platform(platform) ne "windows"} {
+        set failed [catch {
+            exec $::redis_server_path {*}$args 2>@1
+        } output]
+        if {!$failed} {
+            error "redis-server unexpectedly accepted startup arguments: $args"
+        }
+        return $output
+    }
+
+    set probe_dir [tmpdir redis-server-startup-error]
+    set stdout [file join $probe_dir stdout]
+    set stderr [file join $probe_dir stderr]
+    set pid {}
+    set cleanup_error {}
+
+    # The Windows native logger honors --logfile before redis_main() parses
+    # the remaining options.  A malformed later directive can therefore put
+    # the authoritative fatal-config diagnostic in that file instead of the
+    # launcher's stdout/stderr handles.  Remember those paths so the probe
+    # returns the same diagnostics that a direct redis-server invocation
+    # exposes, without deleting a file that existed before the probe.
+    set native_logfiles {}
+    set native_logfile_existed {}
+    for {set arg_index 0} {$arg_index < [llength $args]} {incr arg_index} {
+        set arg [lindex $args $arg_index]
+        set logfile_value {}
+        if {$arg eq "--logfile"} {
+            if {$arg_index + 1 < [llength $args]} {
+                incr arg_index
+                set logfile_value [lindex $args $arg_index]
+            }
+        } elseif {[regexp {^--logfile[ \t]+(.+)$} $arg -> logfile_value]} {
+            # Redis accepts an option name and value in one argv element.
+        }
+        if {$logfile_value eq {}} { continue }
+        if {[string length $logfile_value] >= 2} {
+            set first_char [string index $logfile_value 0]
+            set last_char [string index $logfile_value end]
+            if {($first_char eq {"} && $last_char eq {"}) ||
+                ($first_char eq {'} && $last_char eq {'})} {
+                set logfile_value [string range $logfile_value 1 end-1]
+            }
+        }
+        if {$logfile_value eq {} ||
+            [string equal -nocase $logfile_value stdout]} {
+            continue
+        }
+        if {[catch {set logfile_path [file normalize $logfile_value]}]} {
+            continue
+        }
+        if {[lsearch -exact $native_logfiles $logfile_path] < 0} {
+            lappend native_logfiles $logfile_path
+            dict set native_logfile_existed $logfile_path [file exists $logfile_path]
+        }
+    }
+
+    set caught [catch {
+        set launch_cmd [list $::redis_test_launcher_path $stdout $stderr -- \
+            $::redis_server_path]
+        lappend launch_cmd {*}$args
+        set pid [string trim [exec {*}$launch_cmd]]
+        if {![string is wideinteger -strict $pid] || $pid <= 0} {
+            error "hidden Redis launcher returned an invalid PID: $pid"
+        }
+
+        set exited 0
+        for {set attempt 0} {$attempt < 300} {incr attempt} {
+            if {![process_is_alive $pid]} {
+                set exited 1
+                break
+            }
+            after 100
+        }
+        if {!$exited} {
+            error "redis-server unexpectedly remained running for startup arguments: $args"
+        }
+
+        set output {}
+        foreach logfile [list $stdout $stderr] {
+            if {[file exists $logfile]} {
+                set fp [open $logfile r]
+                append output [read $fp]
+                close $fp
+            }
+        }
+        foreach logfile $native_logfiles {
+            if {[file exists $logfile] && [file isfile $logfile]} {
+                set fp [open $logfile r]
+                append output [read $fp]
+                close $fp
+            }
+        }
+        set output
+    } result options]
+
+    if {$pid ne {} && [process_is_alive $pid]} {
+        if {![windows_process_matches $pid]} {
+            set cleanup_error \
+                "refusing to terminate unexpected startup-probe PID $pid"
+        } elseif {[catch {windows_kill_proc2_checked $pid} kill_error]} {
+            set cleanup_error $kill_error
+        } else {
+            set exited 0
+            for {set attempt 0} {$attempt < 100} {incr attempt} {
+                if {![process_is_alive $pid]} {
+                    set exited 1
+                    break
+                }
+                after 20
+            }
+            if {!$exited} {
+                set cleanup_error "startup-probe PID $pid did not exit"
+            }
+        }
+    }
+    foreach logfile $native_logfiles {
+        if {![dict get $native_logfile_existed $logfile]} {
+            catch {file delete -force $logfile}
+        }
+    }
+    catch {file delete -force $probe_dir}
+
+    if {$cleanup_error ne {}} { error $cleanup_error }
+    if {$caught} { return -options $options $result }
+    return $result
+}
+
+if {$::tcl_platform(platform) eq "windows"} {
+    proc is_alive config { return [windows_is_alive $config] }
+    proc kill_proc config { windows_kill_proc $config }
+    proc kill_proc2 pid { windows_kill_proc2 $pid }
+    proc kill_proc2_checked pid { windows_kill_proc2_checked $pid }
+} else {
+    proc is_alive config {
+        set pid [dict get $config pid]
+        return [expr {![catch {exec kill -0 $pid}]}]
+    }
+    proc kill_proc config {
+        set pid [dict get $config pid]
+        catch {exec kill -SIGCONT $pid}
+        catch {exec kill $pid}
+    }
+    proc kill_proc2 pid { catch {exec /bin/kill -9 $pid} }
+    proc kill_proc2_checked pid { exec /bin/kill -9 $pid }
+}
+
+
 proc start_server_error {config_file error} {
     set err {}
     append err "Can't start the Redis server\n"

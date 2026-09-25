@@ -1112,14 +1112,16 @@ start_server {tags {"zset"}} {
             r del zscoretest
             set aux {}
             for {set i 0} {$i < $elements} {incr i} {
-                set score [expr rand()]
+                # Always cover scientific notation as well as random scores.
+                set score [expr {$i == 0 ? 8.4181316236118468e-05 : rand()}]
                 lappend aux $score
                 r zadd zscoretest $score $i
             }
 
             assert_encoding $encoding zscoretest
             for {set i 0} {$i < $elements} {incr i} {
-                assert_equal [lindex $aux $i] [r zscore zscoretest $i]
+                # Compare exact doubles, allowing platform-specific exponent padding.
+                assert_equal [expr {double([lindex $aux $i])}] [expr {double([r zscore zscoretest $i])}]
             }
         }
 
@@ -1127,14 +1129,14 @@ start_server {tags {"zset"}} {
             r del zscoretest
             set aux {}
             for {set i 0} {$i < $elements} {incr i} {
-                set score [expr rand()]
+                set score [expr {$i == 0 ? 8.4181316236118468e-05 : rand()}]
                 lappend aux $score
                 r zadd zscoretest $score $i
             }
 
             assert_encoding $encoding zscoretest
             for {set i 0} {$i < $elements} {incr i} {
-                assert_equal [lindex $aux $i] [r zmscore zscoretest $i]
+                assert_equal [expr {double([lindex $aux $i])}] [expr {double([r zmscore zscoretest $i])}]
             }
         }
 
@@ -1142,7 +1144,7 @@ start_server {tags {"zset"}} {
             r del zscoretest
             set aux {}
             for {set i 0} {$i < $elements} {incr i} {
-                set score [expr rand()]
+                set score [expr {$i == 0 ? 8.4181316236118468e-05 : rand()}]
                 lappend aux $score
                 r zadd zscoretest $score $i
             }
@@ -1150,7 +1152,7 @@ start_server {tags {"zset"}} {
             r debug reload
             assert_encoding $encoding zscoretest
             for {set i 0} {$i < $elements} {incr i} {
-                assert_equal [lindex $aux $i] [r zscore zscoretest $i]
+                assert_equal [expr {double([lindex $aux $i])}] [expr {double([r zscore zscoretest $i])}]
             }
         }
 

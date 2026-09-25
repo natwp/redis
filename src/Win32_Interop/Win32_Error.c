@@ -467,11 +467,13 @@ int win32_utf8_contains_ignore_case(const char *value, const char *needle) {
         free(wide_value);
         return 0;
     }
+
     value_length = wcslen(wide_value);
     needle_length = wcslen(wide_needle);
     if (needle_length == 0) {
         result = 1;
-    } else if (needle_length <= value_length && needle_length <= INT_MAX) {
+    } else if (needle_length <= value_length &&
+               needle_length <= INT_MAX) {
         for (offset = 0; offset <= value_length - needle_length; offset++) {
             if (CompareStringOrdinal(wide_value + offset, (int)needle_length,
                                      wide_needle, (int)needle_length, TRUE) ==
@@ -482,8 +484,35 @@ int win32_utf8_contains_ignore_case(const char *value, const char *needle) {
             }
         }
     }
+
     free(wide_needle);
     free(wide_value);
+    return result;
+}
+
+int win32_utf8_paths_equal(const char *first, const char *second) {
+    wchar_t *wide_first = win32_utf8_to_wide(first);
+    wchar_t *wide_second;
+    wchar_t *cursor;
+    int result;
+
+    if (wide_first == NULL) return 0;
+    wide_second = win32_utf8_to_wide(second);
+    if (wide_second == NULL) {
+        free(wide_first);
+        return 0;
+    }
+
+    for (cursor = wide_first; *cursor != L'\0'; cursor++) {
+        if (*cursor == L'/') *cursor = L'\\';
+    }
+    for (cursor = wide_second; *cursor != L'\0'; cursor++) {
+        if (*cursor == L'/') *cursor = L'\\';
+    }
+    result = CompareStringOrdinal(wide_first, -1, wide_second, -1, TRUE) ==
+             CSTR_EQUAL;
+    free(wide_second);
+    free(wide_first);
     return result;
 }
 

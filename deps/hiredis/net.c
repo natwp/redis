@@ -107,6 +107,11 @@ ssize_t redisNetWrite(redisContext *c) {
         if (((errno == EWOULDBLOCK || errno == EAGAIN) &&
              !(c->flags & REDIS_BLOCK)) || (errno == EINTR)) {
             /* Try again later */
+#ifdef _WIN32
+            /* No bytes were consumed. The async adapter will retry when
+             * IOCP reports write readiness again. */
+            return 0;
+#endif
         } else {
             __redisSetError(c, REDIS_ERR_IO, NULL);
             return -1;

@@ -83,3 +83,20 @@ settings that cannot be represented in source.
   from an MSYS2 `MINGW64` shell.
 - stale allocator or dependency state after switching branches: run
   `./build-mingw.sh distclean` before rebuilding.
+
+## Affinity and executable hardening
+
+The Windows CPU-list options validate and apply processor-group affinity.
+See the branch behavior guide for the exact option names and constraints.
+The CLI and benchmark enable ASLR; the server and its aliases keep the fixed
+image layout required by QFork. Focused checks are:
+
+```bash
+./build-mingw.sh -j2 all interop-test
+./runtest-mingw.sh --single windows/config --single windows/cpuaffinity --single windows/iocp --clients 1 --quiet --timeout 300
+./build/mingw64/redis-affinity-test.exe
+bash tests/windows/pe-hardening.sh build/mingw64
+```
+
+The source-declared Windows package revision is read from
+`packaging/mingw/windows-revision`; explicit inputs must match it.

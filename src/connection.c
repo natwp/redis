@@ -29,6 +29,9 @@
 
 #include "server.h"
 #include "connhelpers.h"
+#ifdef _WIN32
+#include "Win32_Interop/Win32_Error.h"
+#endif
 
 /* The connections module provides a lean abstraction of network connections
  * to avoid direct socket and async event management across the Redis code base.
@@ -164,6 +167,12 @@ static void connSocketClose(connection *conn) {
 }
 
 static int connSocketWrite(connection *conn, const void *data, size_t data_len) {
+#ifdef _WIN32
+    if (conn->state == CONN_STATE_ERROR) {
+        errno = conn->last_errno ? conn->last_errno : EIO;
+        return -1;
+    }
+#endif
     int ret = write(conn->fd, data, data_len);
     if (ret < 0 && errno != EAGAIN) {
         conn->last_errno = errno;
@@ -179,6 +188,12 @@ static int connSocketWrite(connection *conn, const void *data, size_t data_len) 
 }
 
 static int connSocketRead(connection *conn, void *buf, size_t buf_len) {
+#ifdef _WIN32
+    if (conn->state == CONN_STATE_ERROR) {
+        errno = conn->last_errno ? conn->last_errno : EIO;
+        return -1;
+    }
+#endif
     int ret = read(conn->fd, buf, buf_len);
     if (!ret) {
         conn->state = CONN_STATE_CLOSED;
@@ -217,18 +232,31 @@ static int connSocketAccept(connection *conn, ConnectionCallbackFunc accept_hand
  * loop.
  */
 static int connSocketSetWriteHandler(connection *conn, ConnectionCallbackFunc func, int barrier) {
-    if (func == conn->write_handler) return C_OK;
+    int same_handler = func == conn->write_handler;
 
     conn->write_handler = func;
     if (barrier)
         conn->flags |= CONN_FLAG_WRITE_BARRIER;
     else
         conn->flags &= ~CONN_FLAG_WRITE_BARRIER;
+    if (same_handler) {
+#ifdef _WIN32
+        if (conn->write_handler)
+            aeSetFileEventBarrier(server.el, conn->fd, barrier);
+#endif
+        return C_OK;
+    }
     if (!conn->write_handler)
         aeDeleteFileEvent(server.el,conn->fd,AE_WRITABLE);
-    else
+    else {
         if (aeCreateFileEvent(server.el,conn->fd,AE_WRITABLE,
                     conn->type->ae_handler,conn) == AE_ERR) return C_ERR;
+#ifdef _WIN32
+        /* IOCP reports read and write readiness as separate completions, so
+         * expose the logical connection barrier to the AE batching layer. */
+        aeSetFileEventBarrier(server.el, conn->fd, barrier);
+#endif
+    }
     return C_OK;
 }
 
@@ -247,8 +275,31 @@ static int connSocketSetReadHandler(connection *conn, ConnectionCallbackFunc fun
     return C_OK;
 }
 
+#ifdef _WIN32
+/* A one-shot IOCP rearm failure must not leave a live connection registered
+ * with no future completion.  Mark the connection failed and run its current
+ * handler once so the owner follows the normal cleanup path. */
+static int connSocketRearmFailed(connection *conn,
+                                 ConnectionCallbackFunc handler,
+                                 const char *operation)
+{
+    int error = errno;
+    conn->last_errno = error;
+    conn->state = CONN_STATE_ERROR;
+    aeDeleteFileEvent(server.el, conn->fd, AE_READABLE | AE_WRITABLE);
+    serverLog(LL_WARNING, "IOCP %s rearm failed for fd=%d: %s",
+              operation, conn->fd, wsa_strerror(error));
+    if (handler != NULL) return callHandler(conn, handler);
+    return 1;
+}
+#endif
+
 static const char *connSocketGetLastError(connection *conn) {
+#ifdef _WIN32
+    return wsa_strerror(conn->last_errno);
+#else
     return strerror(conn->last_errno);
+#endif
 }
 
 static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientData, int mask)
@@ -257,10 +308,22 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
     UNUSED(fd);
     connection *conn = clientData;
 
+#ifdef _WIN32
+    int deferred_error = WSIOCP_TakeDeferredError(fd);
+    if (deferred_error != 0) {
+        conn->last_errno = deferred_error;
+    }
+#endif
+
     if (conn->state == CONN_STATE_CONNECTING &&
             (mask & AE_WRITABLE) && conn->conn_handler) {
 
+#ifdef _WIN32
+        int conn_error = deferred_error != 0 ? deferred_error :
+                         connGetSocketError(conn);
+#else
         int conn_error = connGetSocketError(conn);
+#endif
         if (conn_error) {
             conn->last_errno = conn_error;
             conn->state = CONN_STATE_ERROR;
@@ -293,18 +356,27 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
     /* Handle normal I/O flows */
     if (!invert && call_read) {
         if (!callHandler(conn, conn->read_handler)) return;
+#ifdef _WIN32
+        /* IOCP read readiness is one-shot.  Re-arm only after the handler has
+         * returned and only if the connection is still live and subscribed. */
+        if (conn->fd != -1 && conn->read_handler &&
+            conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
+            if (WSIOCP_QueueNextRead(conn->fd) != 0) {
+                connSocketRearmFailed(conn, conn->read_handler, "read");
+                return;
+            }
+        }
+#endif
     }
     /* Fire the writable event. */
     if (call_write) {
         if (!callHandler(conn, conn->write_handler)) return;
 #ifdef _WIN32
-        /* IOCP writable notifications are one-shot; emulate level triggering. */
-        if (conn->write_handler) {
-            if (aeCreateFileEvent(server.el,conn->fd,AE_WRITABLE,
-                        conn->type->ae_handler,conn) == AE_ERR)
-            {
-                conn->last_errno = errno;
-                conn->state = CONN_STATE_ERROR;
+        if (conn->fd != -1 && conn->write_handler &&
+            conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
+            if (WSIOCP_QueueWriteReady(conn->fd) != 0) {
+                connSocketRearmFailed(conn, conn->write_handler, "write");
+                return;
             }
         }
 #endif
@@ -313,6 +385,15 @@ static void connSocketEventHandler(struct aeEventLoop *el, int fd, void *clientD
      * after the writable one. */
     if (invert && call_read) {
         if (!callHandler(conn, conn->read_handler)) return;
+#ifdef _WIN32
+        if (conn->fd != -1 && conn->read_handler &&
+            conn->state != CONN_STATE_CLOSED && conn->state != CONN_STATE_ERROR) {
+            if (WSIOCP_QueueNextRead(conn->fd) != 0) {
+                connSocketRearmFailed(conn, conn->read_handler, "read");
+                return;
+            }
+        }
+#endif
     }
 }
 

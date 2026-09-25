@@ -13,6 +13,9 @@ source tests/support/util.tcl
 
 set ::all_tests {
     windows/regression
+    windows/iocp
+    windows/config
+    windows/cpuaffinity
     unit/printver
     unit/dump
     unit/auth

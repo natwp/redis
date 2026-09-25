@@ -42,6 +42,8 @@ done
 [[ -f "$toolchain_file" ]] || die "toolchain inventory not found: $toolchain_file"
 [[ -f "$identity_file" ]] || die "package binary identity report not found: $identity_file"
 [[ "$windows_revision" =~ ^[1-9][0-9]*$ ]] || die "invalid Windows revision"
+source_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+bash "$source_root/scripts/windows-package-revision.sh" "$source_root" "$windows_revision" >/dev/null
 [[ -n "$baseline_reference" ]] || die "benchmark baseline reference is empty"
 jq -e 'type == "object" and (.policy | type == "string")' "$gate_json" >/dev/null ||
     die "qualification gate JSON is invalid"
@@ -305,8 +307,8 @@ jq -n \
         schema_version:$schema_version,
         release:{version:$version,windows_revision:($windows_revision|tonumber),tag:$tag,branch:$branch},
         source:{commit:$source_commit,tree:$source_tree},
-        package:{archive:$archive,sha256:$archive_sha256,scope:"Redis core only"},
-        qualification:{workflow_url:$workflow_url,completed_utc:$completed_utc,all_required_tests:"passed",release_binary_identity:"passed",maintained_lines:$maintained_lines[0]},
+        package:{archive:$archive,sha256:$archive_sha256,scope:"Redis core only",tls:{build:"no"}},
+        qualification:{transports:["plaintext"],workflow_url:$workflow_url,completed_utc:$completed_utc,all_required_tests:"passed",release_binary_identity:"passed",maintained_lines:$maintained_lines[0]},
         benchmark:{baseline_reference:$baseline,regression_advisory:$benchmark_status,blocking:false},
         attestations:{required_before_publication:{build_provenance:true,sbom:true},created_by:"Publish Windows release workflow"}
     }' > "$output_dir/release-evidence.json"

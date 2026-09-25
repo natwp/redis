@@ -536,7 +536,10 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (nread == -1) {
         if ((errno == ENOENT) || (errno == EAGAIN)) {
             errno = EAGAIN;
-            WSIOCP_QueueNextRead((int) c->context->fd);
+            if (WSIOCP_QueueNextRead((int)c->context->fd) != 0) {
+                fprintf(stderr, "Error rearming socket read: %s\n", wsa_strerror(errno));
+                exit(1);
+            }
             return;
         } else {
             fprintf(stderr,"Error: %s\n",c->context->errstr);
@@ -549,7 +552,12 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         fprintf(stderr,"Error: %s\n",c->context->errstr);
         exit(1);
     } else {
-        WIN32_ONLY(WSIOCP_QueueNextRead((int) c->context->fd);)
+#ifdef _WIN32
+        if (WSIOCP_QueueNextRead((int)c->context->fd) != 0) {
+            fprintf(stderr, "Error rearming socket read: %s\n", wsa_strerror(errno));
+            exit(1);
+        }
+#endif
         while(c->pending) {
             if (redisGetReply(c->context,&reply) != REDIS_OK) {
                 fprintf(stderr,"Error: %s\n",c->context->errstr);
@@ -659,13 +667,22 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
 
 #ifdef _WIN32
 static void writeHandlerDone(aeEventLoop *el, int fd, void *privdata, int nwritten) {
-    WSIOCP_Request *req = (WSIOCP_Request *) privdata;
-    client c = (client) req->client;
+    WSIOCP_Request *req = privdata;
+    client c = req->client;
+    size_t obuf_len = sdslen(c->obuf);
 
-    c->written += nwritten;
-    if (sdslen(c->obuf) == c->written) {
-        aeDeleteFileEvent(el, (int) c->context->fd, AE_WRITABLE);
-        aeCreateFileEvent(el, (int) c->context->fd, AE_READABLE, readHandler, c);
+    if (c->written > obuf_len || nwritten <= 0 ||
+        (size_t)nwritten > obuf_len-c->written)
+    {
+        freeClient(c);
+        return;
+    }
+    c->written += (size_t)nwritten;
+    if (obuf_len == c->written) {
+        aeDeleteFileEvent(el,fd,AE_WRITABLE);
+        aeCreateFileEvent(el,fd,AE_READABLE,readHandler,c);
+    } else if (WSIOCP_QueueWriteReady(fd) == -1) {
+        freeClient(c);
     }
 }
 #endif
@@ -701,18 +718,26 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (writeLen > 0) {
         void *ptr = c->obuf+c->written;
 #ifdef _WIN32
+        int send_len = writeLen > INT_MAX ? INT_MAX : (int)writeLen;
         int result = WSIOCP_SocketSend(c->context->fd,
-                                       (char*)ptr,
-                                       (int)writeLen,
+                                       ptr,
+                                       send_len,
                                        el,
                                        c,
                                        NULL,
                                        writeHandlerDone);
         if (result == SOCKET_ERROR && errno != EINPROGRESS) {
             if (errno != EPIPE)
-                fprintf(stderr, "Writing to socket: %s\n", wsa_strerror(errno));
+                fprintf(stderr,"Writing to socket: %s\n",wsa_strerror(errno));
             freeClient(c);
-            return;
+        } else if (result >= 0) {
+            c->written += (size_t)result;
+            if (c->written == sdslen(c->obuf)) {
+                aeDeleteFileEvent(el,c->context->fd,AE_WRITABLE);
+                aeCreateFileEvent(el,c->context->fd,AE_READABLE,readHandler,c);
+            } else if (WSIOCP_QueueWriteReady(c->context->fd) == -1) {
+                freeClient(c);
+            }
         }
 #else
         while(1) {
