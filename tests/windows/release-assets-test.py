@@ -40,7 +40,7 @@ class ReleaseAssets(unittest.TestCase):
         change(data)
         self.write_json(name, data)
 
-    def fixture(self, version="8.10.2", revision=1):
+    def fixture(self, version="8.10.2", revision=1, checksum_marker=" "):
         for path in self.path.iterdir():
             path.unlink()
         tls = version.startswith("8.")
@@ -64,7 +64,7 @@ class ReleaseAssets(unittest.TestCase):
             for name, data in files.items():
                 archive.writestr(name, data)
         archive_sha = digest((self.path / archive_name).read_bytes())
-        (self.path / "SHA256SUMS.txt").write_text(f"{archive_sha}  {archive_name}\n")
+        (self.path / "SHA256SUMS.txt").write_text(f"{archive_sha} {checksum_marker}{archive_name}\n")
         (self.path / "BUILDINFO.txt").write_text(buildinfo)
         (self.path / "package-manifest.txt").write_bytes(files["PACKAGE-MANIFEST.txt"])
         identity = "build_file\tpackage_file\tsha256\tsize\n" + "".join(
@@ -114,9 +114,28 @@ class ReleaseAssets(unittest.TestCase):
 
     def test_release_matrix(self):
         for version, revision in (("8.10.2", 1), ("8.8.3", 1), ("7.2.16", 2), ("6.2.24", 2)):
-            with self.subTest(version=version):
-                self.fixture(version, revision)
-                self.verify(True)
+            for marker in (" ", "*"):
+                with self.subTest(version=version, checksum_marker=marker):
+                    self.fixture(version, revision, checksum_marker=marker)
+                    self.verify(True)
+
+    def test_checksum_record_corruption(self):
+        for marker in (" ", "*"):
+            for corruption in ("digest", "name", "extra_record", "marker"):
+                with self.subTest(checksum_marker=marker, corruption=corruption):
+                    self.fixture(checksum_marker=marker)
+                    path = self.path / "SHA256SUMS.txt"
+                    record = path.read_text()
+                    if corruption == "digest":
+                        record = "0" * 64 + record[64:]
+                    elif corruption == "name":
+                        record = record.replace("Redis-x64-", "Other-x64-")
+                    elif corruption == "extra_record":
+                        record += record
+                    else:
+                        record = record[:65] + "?" + record[66:]
+                    path.write_text(record)
+                    self.verify()
 
     def test_revision_one_bytes_cannot_publish_as_revision_two(self):
         self.fixture("7.2.16", 1)

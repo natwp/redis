@@ -53,7 +53,11 @@ if ! diff -u \
   echo 'release assets contain missing or unexpected files' >&2
   exit 1
 fi
-[[ "$(cat SHA256SUMS.txt)" == "$archive_sha  $archive_name" ]] || {
+# GNU checksum records use a space for text mode and '*' for binary mode.
+# MSYS2 produces binary-mode records; both must name exactly this archive.
+checksum_record="$(cat SHA256SUMS.txt)"
+[[ "$checksum_record" == "$archive_sha  $archive_name" ||
+   "$checksum_record" == "$archive_sha *$archive_name" ]] || {
   echo 'release checksum does not identify exactly the expected archive' >&2; exit 1;
 }
 sha256sum -c SHA256SUMS.txt
