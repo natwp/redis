@@ -280,8 +280,16 @@ proc cleanup {} {
     }
     if {!$::quiet} {puts -nonewline "Cleanup: may take some time... "}
     flush stdout
-    catch {exec rm -rf {*}[glob tests/tmp/redis.conf.*]}
-    catch {exec rm -rf {*}[glob tests/tmp/server.*]}
+    if {$::tcl_platform(platform) eq "windows"} {
+        # Avoid waiting on an MSYS2 subprocess after the worker clients exit.
+        # Native Tcl deletion also keeps cleanup independent of shell tools.
+        foreach path [glob -nocomplain tests/tmp/redis.conf.* tests/tmp/server.*] {
+            catch {file delete -force $path}
+        }
+    } else {
+        catch {exec rm -rf {*}[glob tests/tmp/redis.conf.*]}
+        catch {exec rm -rf {*}[glob tests/tmp/server.*]}
+    }
     if {!$::quiet} {puts "OK"}
 }
 

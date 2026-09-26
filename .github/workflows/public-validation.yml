@@ -111,3 +111,16 @@ jobs:
           --single integration/redis-benchmark
       - name: Check Sentinel links and replica reconfiguration
         run: ./runtest-mingw.sh --sentinel --single 00-base --single 02-slaves-reconf
+      - name: Check interrupted diskless loading
+        timeout-minutes: 10
+        run: ./runtest-mingw.sh --cluster --single 17-diskless-load-swapdb --dont-clean
+      - name: Upload failed test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-diagnostics
+          path: |
+            tests/tmp
+            tests/cluster/tmp
+          if-no-files-found: warn
+          retention-days: 7

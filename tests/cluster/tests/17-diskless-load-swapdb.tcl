@@ -28,9 +28,10 @@ test "Right to restore backups when fail to diskless load " {
     $master config set repl-backlog-size 1024
     $master config set repl-diskless-sync yes
     if {$::tcl_platform(platform) eq "windows"} {
-        # Give the restart helper time to complete its readiness PING before
-        # the deliberately slow streamed RDB starts loading.
-        $master config set repl-diskless-sync-delay 1
+        # Hold the streamed RDB until the restart helper completes its PING.
+        # Otherwise the helper can wait through the entire load before the
+        # test gets a chance to observe and interrupt it.
+        $master config set repl-diskless-sync-delay 600
     } else {
         $master config set repl-diskless-sync-delay 0
     }
@@ -66,10 +67,15 @@ test "Right to restore backups when fail to diskless load " {
             }
         }
     }
+    $rd close
 
     # Start the replica again
     restart_instance redis $replica_id
+    set replica [Rn $replica_id]
     $replica READONLY
+    if {$::tcl_platform(platform) eq "windows"} {
+        $master config set repl-diskless-sync-delay 0
+    }
 
     # Start full sync, wait till after db is flushed (backed up)
     wait_for_condition 500 10 {
