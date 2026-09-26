@@ -113,5 +113,18 @@ jobs:
         run: |
           ./build/mingw64/interop-test.exe --legacy
           ./build/mingw64/interop-test.exe --modern
+      - name: Check timed-out script shutdown
+        timeout-minutes: 10
+        run: >-
+          ./runtest-mingw.sh --clients 1 --timeout 300 --dont-clean
+          --single unit/scripting
       - name: Check Sentinel links and configuration updates
         run: ./runtest-mingw.sh --sentinel --single 00-base --single 01-conf-update
+      - name: Upload failed test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-diagnostics
+          path: tests/tmp
+          if-no-files-found: warn
+          retention-days: 7

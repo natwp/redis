@@ -1330,6 +1330,10 @@ start_server {tags {"scripting"}} {
     } {OK} {external:skip needs:debug}
 
     test {Timedout scripts that modified data can't be killed by SCRIPT KILL} {
+        # The previous test enabled AOF. Finish its initial rewrite before
+        # entering a script that can only exit through SHUTDOWN, which refuses
+        # to stop the server while the initial AOF is still being written.
+        waitForBgrewriteaof r
         set rd [redis_deferring_client]
         r config set lua-time-limit 10
         run_script_on_connection $rd {redis.call('set',KEYS[1],'y'); while true do end} 1 x
