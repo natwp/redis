@@ -72,6 +72,9 @@ class ReleaseAssets(unittest.TestCase):
         (self.path / "package-binary-identity.tsv").write_text(identity)
         for name in ("TEST-REPORT.md", "benchmark.csv", "toolchain.txt"):
             (self.path / name).write_text("synthetic test fixture\n")
+        if tls:
+            (self.path / "benchmark.csv").write_text(
+                "status,transport,reason\nskipped,plaintext,excluded for TLS-enabled releases\n")
         package_tls = {"build": "no"}
         if tls:
             package_tls = {"build": "yes", "linkage": "static", "openssl_version": "3.6.3",
@@ -83,8 +86,11 @@ class ReleaseAssets(unittest.TestCase):
             "package": {"archive": archive_name, "sha256": archive_sha,
                         "scope": "Redis core only", "tls": package_tls},
             "qualification": {"all_required_tests": "passed", "release_binary_identity": "passed",
-                              "transports": ["plaintext", "TLS"] if tls else ["plaintext"],
+                              "transports": ["TLS"] if tls else ["plaintext"],
+                              "skipped_transports": ["plaintext"] if tls else [],
                               "workflow_url": "https://github.com/example/redis/actions/runs/42"},
+            "benchmark": {"status": "skipped", "transport": "plaintext",
+                          "reason": "excluded for TLS-enabled releases", "blocking": False} if tls else {},
             "attestations": {"required_before_publication": {"build_provenance": True, "sbom": True}}})
         package = {"SPDXID": "SPDXRef-Package", "packageFileName": archive_name,
                    "filesAnalyzed": True, "checksums": [{"algorithm": "SHA256", "checksumValue": archive_sha}],
@@ -134,6 +140,10 @@ class ReleaseAssets(unittest.TestCase):
 
     def test_wrong_transport_or_scope(self):
         for change in (lambda d: d["qualification"].update(transports=["plaintext"]),
+                       lambda d: d["qualification"].update(transports=["plaintext", "TLS"]),
+                       lambda d: d["qualification"].update(transports=[]),
+                       lambda d: d["qualification"].pop("skipped_transports"),
+                       lambda d: d["benchmark"].update(status="passed"),
                        lambda d: d["qualification"].pop("transports"),
                        lambda d: d["package"]["tls"].update(build="no"),
                        lambda d: d["package"].update(scope="bundled modules")):

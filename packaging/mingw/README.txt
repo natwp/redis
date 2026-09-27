@@ -21,7 +21,7 @@ Package contents:
   license texts for statically linked code
 - RELEASENOTES.txt - Windows port release notes and validation scope
 - 00-RELEASENOTES - upstream Redis release notes
-- WINDOWS-7.4-CHANGES.md - current Redis 7.4 Windows constraints and upgrade guide
+- WINDOWS-CHANGES.md - current Redis 7.4 Windows constraints and upgrade guide
 
 This package reports Redis 7.4.11 and is produced only by the CI qualification
 workflow as `Redis-x64-7.4.11-mingw-r1.zip`. The 7.4 line is qualification-only
@@ -32,7 +32,7 @@ revision in CI. Read RELEASENOTES.txt before deployment.
 The included server configurations are Windows-oriented compatibility templates,
 not complete Redis 7.4 manuals. Their active directives have reviewed defaults,
 but some explanatory comments remain reference text inherited from upstream
-templates. Read WINDOWS-7.4-CHANGES.md first, then review ACLs,
+templates. Read WINDOWS-CHANGES.md first, then review ACLs,
 bind/protected-mode settings, the intentional disk-backed replication default,
 persistence, replication credentials, and directory permissions before use.
 

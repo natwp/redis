@@ -40,7 +40,7 @@ entry NACK, preventing the resulting use-after-free.
 
 The canonical Windows line is `mingw-7.4`; its first qualified package is
 identified by `v7.4.10-windows.1` and
-`Redis-x64-7.4.10-mingw-r1.zip`. Read WINDOWS-7.4-CHANGES.md for the
+`Redis-x64-7.4.10-mingw-r1.zip`. Read WINDOWS-CHANGES.md for the
 authoritative Windows-versus-Linux behavior, security, upgrade, QFork,
 networking, module, service, Event Log, and deployment constraints.
 
@@ -72,7 +72,7 @@ Redis-x64-7.2.14-mingw-r1.zip after the required clean-build,
 focused/full-suite, package, fresh-extraction, soak, and exact
 service-restart gates pass.
 
-WINDOWS-7.2-CHANGES.md is the authoritative Windows-versus-Linux behavior and
+WINDOWS-CHANGES.md is the authoritative Windows-versus-Linux behavior and
 upgrade guide. In particular, review its QFork/pagefile, fixed-VA/ASLR,
 single-I/O-thread, TCP-only/no-TLS, multi-part AOF, disk-backed replication,
 native PE-module, synchronous Lua-debugging, Event Log, and service-ACL notes.
@@ -108,10 +108,10 @@ This integration line ports the Redis 6.2.22 core to the existing Windows
 IOCP, QFork, service, Event Log, console, and MinGW64 layers. It adds the Redis
 6.2 command set, ACLs, RESP3, client tracking, expanded replication, Cluster,
 Sentinel, CLI, benchmark, and native module APIs described in
-WINDOWS-6.2-CHANGES.md.
+WINDOWS-CHANGES.md.
 
 The standard portable package is x64, has no OpenSSL/TLS support, and requires
-no external MinGW runtime DLLs. Read WINDOWS-6.2-CHANGES.md before upgrading or
+no external MinGW runtime DLLs. Read WINDOWS-CHANGES.md before upgrading or
 enabling Redis 6-only commands.
 
 --------------------------------------------------------

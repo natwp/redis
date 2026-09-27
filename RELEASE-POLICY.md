@@ -1,39 +1,47 @@
 # Windows release and CI policy
 
-This policy is part of the public Redis Windows port. It describes what the
-repository workflows enforce and what still requires a repository administrator
-to configure in GitHub settings.
+## Current CI scope
 
-## Qualification gates
+Pull requests run public-source hygiene and lightweight offline validation in
+one job with a ten-minute limit. A manual release-branch dispatch can opt into
+one Windows build and focused smoke test, limited to thirty minutes and started only after
+the hygiene job succeeds. Smoke checks do not qualify a release.
 
-- Pull requests run public-source hygiene, a MinGW64 build, focused Redis
-  tests, and legacy/modern Windows interop smoke coverage.
-- Pushes to `mingw-8.10`, `mingw-8.8`, `mingw-7.4`, `mingw-7.2`, and `mingw-6.2`
-  run the full Windows qualification. The gate includes the root, Cluster,
-  Sentinel, and Module API suites; interop; the elevated service/Event Log
-  test; package extraction, license, PE/import and resource checks; packaged
-  replication; and a 30-minute QFork persistence soak.
-- A release dispatch takes an exact 40-character tip SHA. Before Windows
-  qualification is called for that SHA, the workflow verifies that it was
-  dispatched from that same canonical branch and exact commit, then verifies
-  that every one of the five maintained branch tips has a successful
-  full-qualification run. No release is published while one line is stale or
-  failing.
+Full qualification, performance automation, and publication are on hold.
+Full qualification no longer starts on branch pushes. Its retained jobs and
+the release jobs are explicitly disabled. Dependabot configuration is removed;
+dependency updates are reviewed manually.
 
-## Release scope and order
+All Windows workflows share one concurrency group without cancelling an active
+run. Transport matrices permit one job at a time. Dispatch the next long run
+only after the previous run has finished, across all maintained branches.
+Long qualification and release jobs are restricted to `release-*` refs even
+after the hold is lifted. Development branches run only short checks and
+established regression tests; never full suites, benchmarks, or diagnostic
+experiments.
 
-After upstream publishes a maintenance release, update and fully qualify all
-five lines in this order: 8.10, 8.8, 7.4, 7.2, and 6.2. Only then publish the
-release-eligible lines in this order: 8.10, 8.8, 7.2, and 6.2. The 7.4 line is
-updated and tested but is not published under the current license policy. For
-Redis 8, only the latest two minor lines are release eligible.
+Before enabling qualification or publication, review the retained workflows'
+historical push-run evidence assumptions and release-ref checks for the new
+manual, serial process. Preserve every required release gate. GitHub API
+requests, including retries and requests hidden by CLI pagination, must be at
+least five minutes apart. Existing evidence for an earlier source commit does
+not qualify rewritten history.
 
-Upstream imports use a merge commit that retains the upstream Redis and
-tporadowski ancestry, followed by a narrow replay of the upstream delta where
-the historical Windows lineage diverges. Normal maintenance changes use
-reviewed pull requests and squash merge. The intended repository setting is at
-least one approving review, required passing PR smoke checks, and no force push
-after the first public release.
+## Branches and release scope
+
+Development and maintenance use `mingw-<major.minor>` branches. Release
+candidates use `release-<version>` branches. A release branch records a
+candidate; it does not establish that a package has been qualified or published.
+
+After upstream publishes a maintenance release, qualify the five lines in
+order: 8.10, 8.8, 7.4, 7.2, and 6.2. Only after all exact source tips pass may
+the eligible lines be published, in order: 8.10, 8.8, 7.2, and 6.2. Redis 7.4
+remains qualification-only. Redis 8 retains one TLS-capable package per line.
+
+Upstream imports preserve Redis and Windows-upstream ancestry and attribution.
+Source changes continue to use reviewed pull requests. Publication stays
+disabled until upstream is ready and the hold is explicitly lifted. Never
+create release tags or upload packages locally.
 
 ## Package and evidence contract
 
@@ -47,12 +55,14 @@ SPDX file checksums, and SPDX package verification code. The release workflow
 uploads, attests, and publishes that same artifact without rebuilding it. Each
 release carries the ZIP, `SHA256SUMS.txt`, `BUILDINFO.txt`, `package-manifest.txt`,
 `package-binary-identity.tsv`, `toolchain.txt`, `TEST-REPORT.md`,
-`release-evidence.json`, `benchmark.csv`, and `sbom.spdx.json`. The benchmark
+`release-evidence.json`, `benchmark.csv`, and `sbom.spdx.json`. For non-TLS releases, the benchmark
 uses loopback, persistence disabled, one benchmark thread, 50 clients,
 pipeline 1, a discarded 10,000-request warmup, and three 50,000-request
 measurements for PING, SET, and GET. A throughput decrease or p95 increase
 above 15% is an advisory warning; it does not silently turn into a release
-blocker.
+blocker. TLS-enabled releases skip the plaintext benchmark; `benchmark.csv`
+records the skip, and evidence must not claim plaintext qualification or
+measured benchmark results.
 
 The release workflow creates GitHub artifact attestations for both SLSA build
 provenance and the SPDX SBOM. It creates the remote
@@ -80,12 +90,11 @@ Before the first public release, a repository administrator must:
 - protect every canonical `mingw-*` branch against deletion and, after the
   first public release, force pushes;
 - require pull requests, one approving review, resolved conversations, and the
-  `public-hygiene` and `mingw-smoke` PR checks;
+  `public-hygiene` PR check and separately required Windows qualification;
 - keep both squash merging and merge commits available: ordinary maintenance
   is squash-merged, while upstream imports use merge commits to preserve
   Redis and tporadowski ancestry; and
-- leave Dependabot auto-merge disabled. Dependabot is a throttled proposal and
-  security-notification channel, not evidence that a change is qualified.
+- keep Dependabot automation disabled.
 
 The release workflow itself rechecks the successful full-qualification run and
 current tip of all five maintained lines immediately before it creates a tag.

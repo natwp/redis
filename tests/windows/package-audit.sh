@@ -78,8 +78,7 @@ package_dir="$output_dir/package"
 mkdir -p "$package_dir"
 unzip -q "$archive" -d "$package_dir"
 
-release_line="${expected_version%.*}"
-changes_doc="WINDOWS-${release_line}-CHANGES.md"
+changes_doc="WINDOWS-CHANGES.md"
 expected_files="$output_dir/expected-files.txt"
 actual_files="$output_dir/actual-files.txt"
 cat > "$expected_files" <<EOF

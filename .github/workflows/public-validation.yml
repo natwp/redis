@@ -3,17 +3,23 @@ name: Public Windows validation
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows_smoke:
+        description: Run one bounded Windows build and smoke test on a release branch
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: public-validation-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-ci
+  cancel-in-progress: false
 
 jobs:
   public-hygiene:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,7 +48,10 @@ jobs:
             -c src/server.c -o "$RUNNER_TEMP/redis-server-startup.o"
 
   mingw-smoke:
+    needs: public-hygiene
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_smoke && startsWith(github.ref, 'refs/heads/release-') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: msys2 {0}
@@ -102,9 +111,8 @@ jobs:
           make -f Makefile.mingw interop-test
       - name: Run focused Redis tests
         run: >-
-          ./runtest-mingw.sh --clients 1 --quiet --timeout 300
+          ./runtest-mingw.sh --clients 1 --quiet --timeout 120
           --single unit/type/string --single unit/printver
-          --single windows/config --single windows/cpuaffinity --single windows/iocp
       - name: Run Windows CPU affinity tests
         run: ./build/mingw64/redis-affinity-test.exe
       - name: Audit executable hardening
@@ -113,5 +121,3 @@ jobs:
         run: |
           ./build/mingw64/interop-test.exe --legacy
           ./build/mingw64/interop-test.exe --modern
-      - name: Check Sentinel links and configuration updates
-        run: ./runtest-mingw.sh --sentinel --single 00-base --single 01-conf-update
