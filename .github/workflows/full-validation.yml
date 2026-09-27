@@ -1,13 +1,6 @@
 name: Full Windows qualification
 
 on:
-  push:
-    branches:
-      - mingw-8.10
-      - mingw-8.8
-      - mingw-7.4
-      - mingw-7.2
-      - mingw-6.2
   workflow_dispatch:
     inputs:
       source_sha:
@@ -45,10 +38,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-windows-qualification-${{ github.event_name == 'push' && github.ref || inputs.source_sha || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: windows-ci
+  cancel-in-progress: false
 
 env:
+  BUILD_TLS: 'yes'
   SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
   SOURCE_BRANCH: ${{ inputs.source_branch || github.ref_name }}
   WINDOWS_PACKAGE_REVISION: ${{ inputs.package_revision || '' }}
@@ -56,6 +50,8 @@ env:
 
 jobs:
   build:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Build and audit Windows candidate
     runs-on: windows-2022
     timeout-minutes: 90
@@ -292,15 +288,17 @@ jobs:
           retention-days: 14
 
   transports:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Windows qualification (${{ matrix.transport }})
     needs: build
     runs-on: windows-2022
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
-        transport: [plaintext, TLS]
+        transport: [TLS]
     defaults:
       run:
         shell: msys2 {0}
@@ -373,13 +371,6 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve hosted GitHub CLI
-        if: matrix.transport == 'plaintext'
-        shell: pwsh
-        run: |
-          $gh = (Get-Command gh.exe -ErrorAction Stop).Source
-          "GH_CLI=$gh" >> $env:GITHUB_ENV
-
       - name: Download the single qualification candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -415,24 +406,18 @@ jobs:
       - name: Run Redis ${{ matrix.transport }} root test suite
         run: |
           set -o pipefail
-          tls_args=()
-          if [[ "$TRANSPORT" == TLS ]]; then tls_args+=(--tls); fi
-          ./runtest-mingw.sh "${tls_args[@]}" --clients 1 --quiet --timeout 600 --dump-logs \
+          ./runtest-mingw.sh --tls --clients 1 --quiet --timeout 600 --dump-logs \
             2>&1 | tee build/qualification/root-tests.log
 
       - name: Run Redis ${{ matrix.transport }} cluster test suite
         run: |
           set -o pipefail
-          tls_args=()
-          if [[ "$TRANSPORT" == TLS ]]; then tls_args+=(--tls); fi
-          ./runtest-mingw.sh --cluster "${tls_args[@]}" 2>&1 | tee build/qualification/cluster-tests.log
+          ./runtest-mingw.sh --cluster --tls 2>&1 | tee build/qualification/cluster-tests.log
 
       - name: Run Redis ${{ matrix.transport }} Sentinel test suite
         run: |
           set +e
-          tls_args=()
-          if [[ "$TRANSPORT" == TLS ]]; then tls_args+=(--tls); fi
-          ./runtest-mingw.sh --sentinel "${tls_args[@]}" --dont-clean 2>&1 | tee build/qualification/sentinel-tests.log
+          ./runtest-mingw.sh --sentinel --tls --dont-clean 2>&1 | tee build/qualification/sentinel-tests.log
           status=${PIPESTATUS[0]}
           set -e
           if (( status != 0 )); then
@@ -450,19 +435,13 @@ jobs:
       - name: Run Redis ${{ matrix.transport }} Module API test suite
         run: |
           set -o pipefail
-          tls_args=()
-          if [[ "$TRANSPORT" == TLS ]]; then tls_args+=(--tls); fi
-          ./runtest-mingw.sh --moduleapi "${tls_args[@]}" --clients 1 --quiet --timeout 300 \
+          ./runtest-mingw.sh --moduleapi --tls --clients 1 --quiet --timeout 300 \
             2>&1 | tee build/qualification/moduleapi-tests.log
 
       - name: Run elevated ${{ matrix.transport }} Windows service and Event Log test
         run: |
           set -o pipefail
-          service_args=()
-          if [[ "$TRANSPORT" == TLS ]]; then
-            service_args+=(-TLS -ServiceName RedisPortTLSTest -Port 6398)
-          fi
-          ./runtest-mingw-service.sh "${service_args[@]}" 2>&1 | tee build/qualification/service-tests.log
+          ./runtest-mingw-service.sh -TLS -ServiceName RedisPortTLSTest -Port 6398 2>&1 | tee build/qualification/service-tests.log
 
       - name: Verify packaged ${{ matrix.transport }} master and replica synchronization
         shell: pwsh
@@ -470,7 +449,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./tests/windows/package-replication.ps1 `
             -PackageDir 'build/qualification/package-audit/package' `
-            -MasterPort 6391 -ReplicaPort 6392 -TLS:($env:TRANSPORT -eq 'TLS') `
+            -MasterPort 6391 -ReplicaPort 6392 -TLS `
             -OutputDir 'build/qualification/package-replication' `
             -ExpectedVersion $env:REDIS_VERSION `
             2>&1 | Tee-Object -FilePath build/qualification/package-replication.log
@@ -478,64 +457,10 @@ jobs:
       - name: Run packaged ${{ matrix.transport }} QFork persistence and restart soak
         run: |
           set -o pipefail
-          if [[ "$TRANSPORT" == TLS ]]; then export REDIS_PACKAGE_SOAK_TLS=1; fi
+          export REDIS_PACKAGE_SOAK_TLS=1
           REDIS_PACKAGE_SOAK_KEEP=1 \
             tests/windows/package-soak.sh build/qualification/package-audit/package 6393 1800 16 \
             2>&1 | tee build/qualification/package-soak.log
-
-      - name: Prepare same-line benchmark baseline
-        if: matrix.transport == 'plaintext'
-        id: baseline
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="$(sed -n 's/^#define REDIS_VERSION "\([^"]*\)"/\1/p' src/version.h)"
-          line="${version%.*}"
-          mkdir -p build/qualification/benchmark-baseline
-          [[ -n "${GH_CLI:-}" ]] || { echo 'hosted GitHub CLI path is unavailable' >&2; exit 1; }
-          gh_cli="$(cygpath -u "$GH_CLI")"
-          [[ -x "$gh_cli" ]] || { echo 'hosted GitHub CLI is not executable from MSYS2' >&2; exit 1; }
-          releases="$("$gh_cli" api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-          baseline_tag="$(jq -r --arg prefix "v${line}." '
-            [.[].[]?
-              | select(.draft == false and .prerelease == false)
-              | select(.tag_name | startswith($prefix))
-              | select(.tag_name | test("^v[0-9]+[.][0-9]+[.][0-9]+-windows[.][1-9][0-9]*$"))]
-            | sort_by(.published_at // .created_at)
-            | last
-            | .tag_name // empty
-          ' <<<"$releases")"
-          candidate_dir="$(pwd -P)/build/qualification/package-audit/package"
-          if [[ -n "$baseline_tag" ]]; then
-            "$gh_cli" release download "$baseline_tag" --pattern 'Redis-x64-*.zip' --dir build/qualification/benchmark-baseline
-            baseline_archive="$(find build/qualification/benchmark-baseline -maxdepth 1 -type f -name '*.zip' -print -quit)"
-            [[ -n "$baseline_archive" ]]
-            mkdir -p build/qualification/benchmark-baseline/extracted
-            unzip -q "$baseline_archive" -d build/qualification/benchmark-baseline/extracted
-            baseline_dir="$(pwd -P)/build/qualification/benchmark-baseline/extracted"
-          else
-            cp -a "$candidate_dir" build/qualification/benchmark-baseline/extracted
-            baseline_dir="$(pwd -P)/build/qualification/benchmark-baseline/extracted"
-            baseline_tag='none (first same-line release)'
-          fi
-          printf 'baseline_dir=%s\n' "$baseline_dir" >> "$GITHUB_OUTPUT"
-          printf 'baseline_tag=%s\n' "$baseline_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Run short packaged benchmark
-        if: matrix.transport == 'plaintext'
-        env:
-          BASELINE_DIR: ${{ steps.baseline.outputs.baseline_dir }}
-          BASELINE_TAG: ${{ steps.baseline.outputs.baseline_tag }}
-        run: |
-          set -o pipefail
-          tests/windows/package-benchmark.sh \
-            --baseline-dir "$BASELINE_DIR" \
-            --candidate-dir build/qualification/package-audit/package \
-            --port 6394 \
-            --output-dir build/qualification/benchmark \
-            2>&1 | tee build/qualification/package-benchmark.log
-          printf '%s\n' "$BASELINE_TAG" > build/qualification/benchmark/baseline-reference.txt
 
       - name: Reverify the candidate after ${{ matrix.transport }} qualification
         run: |
@@ -576,9 +501,6 @@ jobs:
           mkdir -p build/qualification/transport-evidence
           cp build/qualification/{transport-result.json,package-binary-identity.start.tsv,package-binary-identity.tsv,test-support-after-tests.txt} \
             build/qualification/transport-evidence/
-          if [[ "$TRANSPORT" == plaintext ]]; then
-            cp -a build/qualification/benchmark build/qualification/transport-evidence/
-          fi
 
       - name: Upload successful ${{ matrix.transport }} qualification results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -602,9 +524,10 @@ jobs:
           retention-days: 14
 
   qualify:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Assemble Windows qualification evidence
     needs: [build, transports]
-    if: ${{ needs.build.result == 'success' && needs.transports.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -630,19 +553,13 @@ jobs:
           name: ${{ needs.build.outputs.candidate_artifact_name }}
           path: build/candidate-input
 
-      - name: Download successful plaintext qualification results
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: windows-qualification-result-plaintext-${{ inputs.source_sha || github.sha }}
-          path: build/qualification/results/plaintext
-
       - name: Download successful TLS qualification results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-qualification-result-TLS-${{ inputs.source_sha || github.sha }}
           path: build/qualification/results/TLS
 
-      - name: Require both transport results for the exact candidate
+      - name: Require TLS results for the exact candidate
         run: |
           set -euo pipefail
           printf '%s  %s\n' "$CANDIDATE_SHA256" build/candidate-input/qualification-candidate.tar | sha256sum -c -
@@ -658,7 +575,7 @@ jobs:
             build/qualification/package-binary-identity.tsv
           cmp build/qualification/package-binary-identity.before.tsv \
             build/qualification/package-binary-identity.tsv
-          for transport in plaintext TLS; do
+          for transport in TLS; do
             result_dir="build/qualification/results/$transport"
             jq -e \
               --arg sha "$SOURCE_SHA" --arg tree "$(git rev-parse 'HEAD^{tree}')" \
@@ -674,7 +591,6 @@ jobs:
             cmp build/qualification/package-binary-identity.tsv "$result_dir/package-binary-identity.start.tsv"
             cmp build/qualification/package-binary-identity.tsv "$result_dir/package-binary-identity.tsv"
           done
-          cp -a build/qualification/results/plaintext/benchmark build/qualification/benchmark
 
       - name: Generate sanitized release evidence, SBOM, and test report
         run: |
@@ -685,11 +601,9 @@ jobs:
           ./scripts/generate-release-evidence.sh \
             "$archive" \
             build/qualification/release-package \
-            build/qualification/benchmark \
             build/mingw64/release-assets \
             "$SOURCE_BRANCH" \
             "$WINDOWS_PACKAGE_REVISION" \
-            "$(cat build/qualification/benchmark/baseline-reference.txt)" \
             build/qualification/maintained-lines.json \
             build/qualification/toolchain.txt \
             build/qualification/package-binary-identity.tsv

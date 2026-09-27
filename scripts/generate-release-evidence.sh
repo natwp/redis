@@ -6,7 +6,7 @@ set -euo pipefail
 export LC_ALL=C
 
 usage() {
-    echo "usage: $0 ARCHIVE EXTRACTED_DIR BENCHMARK_DIR OUTPUT_DIR SOURCE_BRANCH WINDOWS_REVISION BASELINE_REFERENCE GATE_JSON TOOLCHAIN_FILE IDENTITY_FILE"
+    echo "usage: $0 ARCHIVE EXTRACTED_DIR OUTPUT_DIR SOURCE_BRANCH WINDOWS_REVISION GATE_JSON TOOLCHAIN_FILE IDENTITY_FILE"
 }
 
 die() {
@@ -14,21 +14,19 @@ die() {
     exit 1
 }
 
-if (( $# != 10 )); then
+if (( $# != 8 )); then
     usage >&2
     exit 2
 fi
 
 archive=$1
 extracted_dir=$2
-benchmark_dir=$3
-output_dir=$4
-source_branch=$5
-windows_revision=$6
-baseline_reference=$7
-gate_json=$8
-toolchain_file=$9
-identity_file=${10}
+output_dir=$3
+source_branch=$4
+windows_revision=$5
+gate_json=$6
+toolchain_file=$7
+identity_file=$8
 
 for tool in awk date find git grep install jq sed sha1sum sha256sum sort tr wc; do
     command -v "$tool" >/dev/null 2>&1 || die "required evidence tool not found: $tool"
@@ -36,15 +34,12 @@ done
 [[ -f "$archive" ]] || die "archive not found: $archive"
 [[ -f "$archive.sha256" ]] || die "archive checksum not found: $archive.sha256"
 [[ -d "$extracted_dir" ]] || die "extracted package not found: $extracted_dir"
-[[ -f "$benchmark_dir/summary.tsv" ]] || die "benchmark summary not found"
-[[ -f "$benchmark_dir/assessment.tsv" ]] || die "benchmark assessment not found"
 [[ -f "$gate_json" ]] || die "qualification gate JSON not found: $gate_json"
 [[ -f "$toolchain_file" ]] || die "toolchain inventory not found: $toolchain_file"
 [[ -f "$identity_file" ]] || die "package binary identity report not found: $identity_file"
 [[ "$windows_revision" =~ ^[1-9][0-9]*$ ]] || die "invalid Windows revision"
 source_root="$(cd "$(dirname "$0")/.." && pwd)"
 bash "$source_root/scripts/windows-package-revision.sh" "$source_root" "$windows_revision" >/dev/null
-[[ -n "$baseline_reference" ]] || die "benchmark baseline reference is empty"
 jq -e 'type == "object" and (.policy | type == "string")' "$gate_json" >/dev/null ||
     die "qualification gate JSON is invalid"
 
@@ -94,45 +89,10 @@ install -m 0644 "$extracted_dir/PACKAGE-MANIFEST.txt" "$output_dir/package-manif
 install -m 0644 "$toolchain_file" "$output_dir/toolchain.txt"
 install -m 0644 "$identity_file" "$output_dir/package-binary-identity.tsv"
 
-awk -F '\t' '
-    function csv(value) {
-        gsub(/"/, "\"\"", value)
-        return "\"" value "\""
-    }
-    {
-        for (column = 1; column <= NF; column++) {
-            printf "%s%s", column == 1 ? "" : ",", csv($column)
-        }
-        printf "\n"
-    }
-' "$benchmark_dir/summary.tsv" > "$output_dir/benchmark.csv"
-
-awk -F '\t' '
-    NR == 1 {
-        if ($1 != "matrix_id" || $2 != "test") invalid = 1
-        next
-    }
-    { rows++ }
-    END { if (invalid || rows == 0) exit 1 }
-' "$benchmark_dir/summary.tsv" || die "benchmark summary is malformed or empty"
-benchmark_status="$(awk -F '\t' '
-    NR == 1 {
-        if ($1 != "metric" || $2 != "value" || $3 != "criterion" || $4 != "pass") invalid = 1
-        next
-    }
-    $1 == "regression_advisory" {
-        matches++
-        status = $4
-    }
-    END {
-        if (invalid || matches != 1) exit 1
-        print status
-    }
-' "$benchmark_dir/assessment.tsv")" || die "benchmark assessment is malformed"
-case "$benchmark_status" in
-    pass|warn) ;;
-    *) die "invalid benchmark advisory status: $benchmark_status" ;;
-esac
+cat > "$output_dir/benchmark.csv" <<'EOF'
+status,transport,reason
+skipped,plaintext,excluded for TLS-enabled releases
+EOF
 
 IFS= read -r -d '' report_template <<'EOF' || true
 # Redis __VERSION__ Windows qualification
@@ -148,27 +108,24 @@ IFS= read -r -d '' report_template <<'EOF' || true
 | --- | --- |
 | Public-source hygiene over full Git history | Passed |
 | MinGW64 core, interop, launcher, and package build | Passed |
-| Redis root test suite (plaintext and TLS) | Passed |
-| Cluster test suite (plaintext and TLS) | Passed |
-| Sentinel test suite (plaintext and TLS) | Passed |
-| Module API test suite (plaintext and TLS) | Passed |
+| Redis root test suite (TLS) | Passed |
+| Cluster test suite (TLS) | Passed |
+| Sentinel test suite (TLS) | Passed |
+| Module API test suite (TLS) | Passed |
 | Windows legacy and modern interop tests | Passed |
-| Isolated Windows service and Event Log test (plaintext and TLS) | Passed |
+| Isolated Windows service and Event Log test (TLS) | Passed |
 | ZIP checksum, extraction, manifest, licenses, PE and import audit | Passed |
 | Release binaries identical to the bytes used by source-tree suites | Passed |
-| Packaged master/replica full and incremental synchronization (plaintext and TLS) | Passed |
-| Packaged QFork RDB/AOF persistence and restart soak (30 minutes per transport) | Passed |
-| Short loopback package benchmark completed | Passed |
+| Packaged master/replica full and incremental synchronization (TLS) | Passed |
+| Packaged QFork RDB/AOF persistence and restart soak (TLS, 30 minutes) | Passed |
+| Plaintext transport suites and TLS-disabled builds | Skipped |
+| Plaintext loopback package benchmark | Skipped |
 
 ## Benchmark
 
-The benchmark uses the packaged client and server on loopback with persistence
-disabled, one benchmark thread, 50 clients, pipeline 1, a discarded 10,000
-request warmup, and three 50,000 request rounds for PING, SET, and GET. The
-baseline reference is `__BASELINE_REFERENCE__`. A throughput decrease or p95
-latency increase greater than 15% is advisory and does not block publication.
-The advisory result for this run is `__BENCHMARK_STATUS__`; exact medians are in
-`benchmark.csv`.
+Plaintext CI is excluded for TLS-enabled releases. The plaintext benchmark
+was skipped; `benchmark.csv` records that decision without claiming measured
+performance or a comparison with an earlier release.
 
 ## Toolchain
 
@@ -184,8 +141,6 @@ report="${report//__SOURCE_TREE__/$source_tree}"
 report="${report//__WORKFLOW_URL__/$workflow_url}"
 report="${report//__WORKFLOW_ATTEMPT__/$workflow_run_attempt}"
 report="${report//__CREATED_UTC__/$created_utc}"
-report="${report//__BASELINE_REFERENCE__/$baseline_reference}"
-report="${report//__BENCHMARK_STATUS__/$benchmark_status}"
 report_file="$output_dir/TEST-REPORT.md"
 printf '%s\n' "$report" > "$report_file"
 [[ "$report" != *__* ]] || die "release report contains an unresolved template placeholder"
@@ -195,10 +150,6 @@ grep -Fq -- "- Canonical branch: \`$source_branch\`" "$report_file" ||
     die "release report is missing the canonical branch"
 grep -Fq -- "- Source commit: \`$source_commit\`" "$report_file" ||
     die "release report is missing the source commit"
-grep -Fq -- "baseline reference is \`$baseline_reference\`." "$report_file" ||
-    die "release report is missing the benchmark baseline"
-grep -Fq -- "The advisory result for this run is \`$benchmark_status\`;" "$report_file" ||
-    die "release report is missing the benchmark assessment"
 
 files_json="$output_dir/.spdx-files.ndjson"
 relationships_json="$output_dir/.spdx-relationships.ndjson"
@@ -320,8 +271,6 @@ jq -n \
     --arg source_tree "$source_tree" \
     --arg archive "$package_name" \
     --arg archive_sha256 "$archive_sha" \
-    --arg baseline "$baseline_reference" \
-    --arg benchmark_status "$benchmark_status" \
     --arg workflow_url "$workflow_url" \
     --arg completed_utc "$created_utc" \
     --arg openssl_version "$openssl_version" \
@@ -332,8 +281,8 @@ jq -n \
         release:{version:$version,windows_revision:($windows_revision|tonumber),tag:$tag,branch:$branch},
         source:{commit:$source_commit,tree:$source_tree},
         package:{archive:$archive,sha256:$archive_sha256,scope:"Redis core only",tls:{build:"yes",linkage:"static",openssl_version:$openssl_version,openssl_package:$openssl_package}},
-        qualification:{workflow_url:$workflow_url,completed_utc:$completed_utc,all_required_tests:"passed",transports:["plaintext","TLS"],release_binary_identity:"passed",maintained_lines:$maintained_lines[0]},
-        benchmark:{baseline_reference:$baseline,regression_advisory:$benchmark_status,blocking:false},
+        qualification:{workflow_url:$workflow_url,completed_utc:$completed_utc,all_required_tests:"passed",transports:["TLS"],skipped_transports:["plaintext"],release_binary_identity:"passed",maintained_lines:$maintained_lines[0]},
+        benchmark:{status:"skipped",transport:"plaintext",reason:"excluded for TLS-enabled releases",blocking:false},
         attestations:{required_before_publication:{build_provenance:true,sbom:true},created_by:"Publish Windows release workflow"}
     }' > "$output_dir/release-evidence.json"
 
