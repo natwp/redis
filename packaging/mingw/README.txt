@@ -21,7 +21,7 @@ Package contents:
 - LICENSE.txt - Windows port BSD-3-Clause notice
 - RELEASENOTES.txt - Windows port release notes and validation scope
 - 00-RELEASENOTES - upstream Redis release notes
-- WINDOWS-7.2-CHANGES.md - current Redis 7.2 Windows constraints and upgrade guide
+- WINDOWS-CHANGES.md - current Redis 7.2 Windows constraints and upgrade guide
 
 This package reports Redis 7.2.16. A public CI release uses
 `Redis-x64-7.2.16-mingw-r2.zip` and tag `v7.2.16-windows.2`; no tag or archive
@@ -32,7 +32,7 @@ deployment. Read RELEASENOTES.txt before upgrading.
 The included server configurations are Windows-oriented compatibility templates,
 not complete Redis 7.2 manuals. Their active directives have reviewed defaults,
 but some explanatory comments remain reference text inherited from upstream
-templates. Read WINDOWS-7.2-CHANGES.md first, then review ACLs,
+templates. Read WINDOWS-CHANGES.md first, then review ACLs,
 bind/protected-mode settings, the intentional disk-backed replication default,
 persistence, replication credentials, and directory permissions before use.
 

@@ -9,7 +9,7 @@ upgrade advice do not describe the Redis 7.2.15 MinGW release.
 Use the current documentation instead:
 
 - [Redis for Windows](README.md) for the supported build and quick start.
-- [Redis 7.2 behavior in the Windows port](WINDOWS-7.2-CHANGES.md) for explicit
+- [Redis 7.2 behavior in the Windows port](WINDOWS-CHANGES.md) for explicit
   differences from original Redis on Linux/POSIX and for upgrade constraints.
 - [Running Redis 7.2 as a Windows service](Windows%20Service%20Documentation.md)
   for the current built-in SCM service interface.

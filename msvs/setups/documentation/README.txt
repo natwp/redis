@@ -7,7 +7,7 @@ validated Redis 7.2.15 release package.
 
 The current release path is the MinGW64 flat ZIP produced by
 package-mingw.sh. Read the repository root README.md,
-WINDOWS-7.2-CHANGES.md, Windows Service Documentation.md, and
+WINDOWS-CHANGES.md, Windows Service Documentation.md, and
 RELEASENOTES.txt before using the files in this directory.
 
 The redis.windows.conf and redis.windows-service.conf files remain the source

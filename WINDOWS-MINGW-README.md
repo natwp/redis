@@ -55,25 +55,31 @@ the pinned release qualification. x86-32, MSVC, and legacy Windows Server
 
 ## CI and releases
 
-Pull requests run public-source hygiene checks, a MinGW build, focused Redis
-tests, and Windows interop smoke coverage. Pushes to canonical `mingw-*`
-branches run the complete Windows qualification, including the source suites,
-service integration, extracted-package audits, packaged replication, a
-30-minute QFork persistence soak, and a short benchmark.
+Pull requests run public-source hygiene and lightweight offline checks with a
+ten-minute job limit. A manual `windows_smoke` dispatch on a `release-*` branch can run
+one MinGW64 build, focused Redis tests, and Windows interop checks, with a
+thirty-minute limit. It starts after hygiene succeeds. All Windows workflows
+share one concurrency group, and transport matrices allow one job at a time.
 
-Public releases are dispatched manually from the default branch with an exact
-canonical-branch commit and expected tag. CI performs one clean package build,
-strips that candidate before testing, extracts it, and runs the source suites
-and packaged checks against those same release bytes. A final hash and archive
-checksum gate runs before CI emits test evidence, an SPDX SBOM, and GitHub
-artifact attestations. The release workflow publishes that uploaded artifact
-without rebuilding it. No release package or tag is created locally. GitHub's
-repository-level release immutability setting must be enabled before the first
-public release.
+Full qualification, performance automation, and publication are on hold.
+Canonical branch pushes do not start full qualification. Before those retained
+workflows are enabled again, their evidence selection and API usage must be
+reviewed for explicit serial runs and the five-minute GitHub request interval.
+Long jobs are restricted to `release-*` branches. Development branches retain
+only short checks and established regression tests, including manual runs.
 
-See [RELEASE-POLICY.md](RELEASE-POLICY.md) for the maintained-line order,
-review policy, benchmark contract, and the small set of GitHub administrator
-settings that cannot be represented in source.
+A public release still requires all Windows source suites, service and Event
+Log coverage, package audits, replication, persistence, and binary identity
+checks for its exact source commit. Redis 8 qualifies the stripped package over
+TLS only. TLS-disabled builds, plaintext transport suites, and plaintext
+benchmarks are excluded from TLS-enabled release CI. Evidence records those
+checks as skipped. A rewritten commit needs fresh qualification.
+Packages, attestations, tags, and uploads are produced by explicitly enabled
+CI only. Existing immutable releases must not be replaced.
+
+The package revision remains declared in `packaging/mingw/windows-revision`.
+See [RELEASE-POLICY.md](RELEASE-POLICY.md) for release gates, maintained-line
+order, branch naming, and the conditions for ending the hold.
 
 ## Troubleshooting
 

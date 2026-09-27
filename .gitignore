@@ -67,3 +67,14 @@ redis-full.conf
 
 # Local Codex credentials and workspace state.
 .codex/
+
+# Local agent guidance and source-audit records.
+AGENTS.md
+AGENTS.*.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.claude/
+WINDOWS-*AUDIT*.md
+*CODE-AUDIT*.md
+*code-audit*.md

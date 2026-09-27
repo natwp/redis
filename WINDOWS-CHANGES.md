@@ -1,6 +1,16 @@
-# Redis 7.2 behavior in the Windows port
+# Windows changes for Redis 7.2.16
 
-## Scope and release identity
+This file records the Windows behavior and upgrade guidance on `mingw-7.2`.
+The current-line section describes this branch. Earlier-line sections preserve
+historical behavior and upgrade notes with their original version boundaries.
+
+Publication and full qualification are on hold; package names below identify
+candidates or historical releases, not qualification of this rewritten source.
+
+## Redis 7.2 (current line)
+
+
+### Scope and release identity
 
 This is an unofficial Windows x64 integration of the Redis 7.2.16 behavior
 baseline, including its upstream security fixes, onto this fork's IOCP
@@ -24,7 +34,7 @@ The required clean build, focused and full test suites, package extraction,
 long persistence soak, and exact service-restart gates are the Redis 7.2.16
 release gates. The historical Redis 7.2.14 archives remain immutable.
 
-### Upstream security-fix provenance
+#### Upstream security-fix provenance
 
 The 7.2.16 source baseline includes the applicable upstream security fixes for
 Lua parser/runtime isolation, blocked-client eviction, RESTORE/RDB validation,
@@ -39,7 +49,7 @@ The standard package is x64 and excludes TLS. Visual Studio/MSI,
 clean-machine, antivirus, and unrelated external deployment checks are not
 covered by this local release matrix.
 
-## Windows revision 2 maintenance
+### Windows revision 2 maintenance
 
 This candidate adds processor-group CPU affinity and enables dynamic-base,
 high-entropy ASLR, NX, and base relocations for the CLI, benchmark, and standalone
@@ -62,7 +72,7 @@ qualification, and release evidence reject conflicting revisions. The package
 remains plaintext and core only, with single-threaded Windows client I/O.
 Every final source tip requires fresh Windows qualification before publication.
 
-## Linux/POSIX and Windows behavior differences
+### Linux/POSIX and Windows behavior differences
 
 | Area | Original Redis 7.2.16 on Linux/POSIX | This Windows port |
 | --- | --- | --- |
@@ -76,7 +86,7 @@ Every final source tip requires fresh Windows qualification before publication.
 | System integration | syslog, Linux OOM score, THP checks, process titles | Windows Application Event Log and SCM; the listed Linux controls do not have equivalent behavior in this build |
 | Distribution | Source build/install conventions vary by platform | Flat x64 ZIP; no external MinGW runtime, MSYS2, Tcl, or Visual Studio installation is required at runtime |
 
-## Networking, CLI, and benchmark behavior
+### Networking, CLI, and benchmark behavior
 
 - The server uses the Windows IOCP event backend and the fork's FDAPI mapping.
   TCP over IPv4 and IPv6 is supported. The standard package rejects a configured
@@ -107,7 +117,7 @@ Every final source tip requires fresh Windows qualification before publication.
   happen during the measured run and may reduce throughput or briefly pause a
   worker loop; per-request timing begins after the reconnect.
 
-## Packaged configuration defaults
+### Packaged configuration defaults
 
 The packaged `redis.windows.conf` and `redis.windows-service.conf` are
 Windows-oriented compatibility templates, not substitutes for reviewing every
@@ -161,7 +171,7 @@ companion as a runtime lock artifact rather than portable dataset state: its
 mere presence is normal, it need not be backed up or deleted, and only the
 held OS lock—not file existence—indicates that another node owns the path.
 
-## Windows text, naming, and filesystem contract
+### Windows text, naming, and filesystem contract
 
 Redis keeps arguments, configuration values, environment values, paths, and
 diagnostics as UTF-8. Invalid UTF-8 is rejected; valid strings are converted
@@ -190,7 +200,7 @@ and transient sharing
 violations from antivirus, backup, or indexing software can therefore still
 affect crash durability or cause an operation to fail after its bounded retry.
 
-## Persistence, QFork, and replication
+### Persistence, QFork, and replication
 
 Windows background RDB saves, AOF rewrites, and diskless full synchronization
 use QFork instead of POSIX `fork()`. QFork launches a fresh copy of the server,
@@ -241,7 +251,7 @@ hints and is disabled by default, as upstream. The Windows regression suite
 covers real movement together with a QFork save/reload cycle; production users
 should still measure latency and memory behavior on their own dataset.
 
-## Redis 6.2 to 7.2 upgrade boundaries
+### Redis 6.2 to 7.2 upgrade boundaries
 
 - Redis 7.2 writes RDB format version 11. Older Redis versions that support only
   an earlier RDB version cannot load a newly written 7.2 RDB. Do not plan an
@@ -260,7 +270,7 @@ should still measure latency and memory behavior on their own dataset.
   the QFork restrictions below. Never copy Linux module binaries into this
   package.
 
-## Functions, Lua, and native modules
+### Functions, Lua, and native modules
 
 Redis Functions add persisted engine and library state beyond ordinary
 `redisServer` roots. Function load, RDB/AOF serialization, replication load,
@@ -306,7 +316,7 @@ persistence-event callbacks that run in a QFork child have a narrower contract:
   inherited snapshot are rejected in the persistence child. Parent execution of
   the normal module APIs remains available.
 
-## Service, Event Log, and console behavior
+### Service, Event Log, and console behavior
 
 Run service-management commands from an elevated command prompt. The service
 action must be the first argument, and `--service-name` must precede the Redis
@@ -359,7 +369,7 @@ semantics when deploying `notification-script`, `client-reconfig-script`, or
 `deny-scripts-reconfig` hooks. Batch or command scripts need an explicit
 interpreter such as `cmd.exe /c`; they are not direct POSIX `execve` targets.
 
-## Package contents and deployment checklist
+### Package contents and deployment checklist
 
 The flat x64 ZIP contains `redis-server.exe`, the `redis-sentinel.exe` alias,
 `redis-cli.exe`, `redis-benchmark.exe`, RDB/AOF checkers, `EventLog.dll`, the
@@ -390,7 +400,7 @@ Before deployment:
 5. Retain the source commit, package checksum, and test evidence. Do not
    downgrade after writing Redis 7.2-specific commands or persistence formats.
 
-## 2026-08-17 Windows revision 1 hardening and qualification
+### 2026-08-17 Windows revision 1 hardening and qualification
 
 - The native test launcher no longer reads another process's PEB or trusts its
   mutable command-line text to identify a QFork child. It now accepts only an
@@ -421,10 +431,307 @@ Before deployment:
   clean-machine, antivirus, signing, and reboot/preshutdown testing remain
   outside this MinGW release matrix.
 
-### Publication status
+#### Publication status
 
 The internal qualification work covered the source, package, extraction,
 service, persistence, and Windows behavior gates. Internal source identifiers,
 artifact checksums, and hosting operations are intentionally omitted from the
 tracked guide. Public release tags and archives are deferred until a CI job
 rebuilds and verifies the selected source revision.
+
+## Redis 6.2 (historical line)
+
+
+### Scope and identity
+
+This is an unofficial Windows x64 port of the Redis 6.2.22 core, based on
+upstream commit `b0f7a7f4d97`, combined with this fork's IOCP networking,
+QFork persistence, Windows service, Event Log, console, and MinGW64 packaging
+layers.
+
+The completed Windows line reports `6.2.22` through `INFO server`, executable
+`--version` output, module version APIs, RDB metadata, and the portable package
+filename. Retain the ZIP checksum and source commit when identifying an exact
+Windows build.
+
+RESP2 remains the default protocol, so existing Redis 5 clients normally keep
+working. RESP3, ACLs, client-side caching, and other Redis 6 behavior are
+opt-in unless configured.
+
+### Commands, protocol, and security
+
+No Redis 5 top-level command was removed. New top-level commands include:
+
+- Security and protocol: `ACL`, `HELLO`, and `RESET`.
+- Strings and algorithms: `BITFIELD_RO`, `GETEX`, `GETDEL`, and `STRALGO`.
+- Lists, sets, and hashes: `LPOS`, `LMOVE`, `BLMOVE`, `SMISMEMBER`, and
+  `HRANDFIELD`.
+- Sorted sets and geospatial indexes: `ZMSCORE`, `ZRANDMEMBER`, `ZDIFF`,
+  `ZDIFFSTORE`, `ZINTER`, `ZUNION`, `ZRANGESTORE`, `GEOSEARCH`, and
+  `GEOSEARCHSTORE`.
+- Streams and operations: `XAUTOCLAIM`, `COPY`, and coordinated `FAILOVER`.
+
+Existing commands also gain Redis 6.2 options, including `SET GET/EXAT/PXAT`,
+`ZADD GT/LT`, unified `ZRANGE BYSCORE/BYLEX/REV`, `XADD NOMKSTREAM/MINID/LIMIT`,
+additional `XPENDING` ranges and idle filtering, `CLIENT PAUSE WRITE`, and
+richer client and Sentinel introspection.
+
+ACLs support named users, command categories, key patterns, Pub/Sub channel
+patterns, an in-memory ACL log, external ACL files, and `AUTH username
+password`. The legacy `requirepass` option remains a compatibility layer for
+the `default` ACL user. `HELLO 3` enables RESP3, including push replies used by
+client tracking and Pub/Sub. Client-side caching is available through `CLIENT
+TRACKING`; its table is bounded by `tracking-table-max-keys`.
+
+The Windows IOCP listener preserves the address family of IPv4 and IPv6
+connections. Protected mode recognizes both `127.0.0.1` and `::1` as loopback,
+including when replication or Sentinel hostname resolution selects IPv6 first.
+
+### Compatibility changes from Redis 5
+
+Applications should review these Redis 6 behavior changes:
+
+- `SPOP key count` returns an empty collection, rather than null, when the key
+  is missing.
+- `GEORADIUS`/`GEORADIUSBYMEMBER` with `STORE` or `STOREDIST` now deletes an
+  existing destination and returns zero when the source key is missing.
+- `PUBSUB NUMPAT` counts unique pattern strings rather than total pattern
+  subscriptions.
+- `EXISTS` no longer updates LRU/LFU state, and `OBJECT` does not expose
+  logically expired keys.
+- Expiration of a watched key can invalidate `EXEC`; `SWAPDB` also invalidates
+  affected watches.
+- Some `AUTH`, `HELLO`, `SELECT`, and `MOVE` errors changed. Clients should not
+  depend on exact error strings.
+- `SORT` behavior on writable replicas and some RESP3 reply shapes differ from
+  Redis 5.
+- A requested bind address that is unavailable now aborts startup unless the
+  address is prefixed with `-`, such as `-::1`. Addresses already in use still
+  fail startup.
+- New or extended commands may be written to AOF or replication streams. After
+  using them, an older Redis 5 replica or downgrade target may not understand
+  the stream.
+
+The RDB format version remains 9, but always back up RDB, AOF, configuration,
+Sentinel, and ACL files before upgrading. Test rollback before using Redis
+6-only commands or module data.
+
+The old `SLAVEOF` command and `slave-*` configuration spellings remain aliases.
+New configurations should use `REPLICAOF` and `replica-*` names.
+
+### Configuration and defaults
+
+The packaged console and service examples bind to `127.0.0.1`, keep protected
+mode enabled, leave AOF disabled, use `tcp-keepalive 300`, and use these
+snapshot points:
+
+```text
+save 3600 1
+save 300 100
+save 60 10000
+```
+
+Review those values when replacing an older Windows configuration. Important
+Redis 6 options include:
+
+- ACLs: `aclfile`, inline `user` rules, `acllog-max-len`, and
+  `acl-pubsub-default`.
+- Networking and performance: `tracking-table-max-keys`,
+  `active-expire-effort`, and `maxmemory-eviction-tenacity`.
+- Persistence and replication: `repl-diskless-load`, `rdb-del-sync-files`,
+  `sanitize-dump-payload`, `lazyfree-lazy-user-flush`, and `masteruser`.
+- Cluster and replica behavior: `cluster-allow-replica-migration`,
+  `cluster-allow-reads-when-down`, and `replica-announced`.
+
+`CONFIG REWRITE` needs write access to the configuration file's directory.
+The Windows service installer grants its NetworkService account access to the
+main configuration/include directories and the configured Redis `dir`.
+Service-relative paths resolve from the executable directory at runtime, while
+install-time ACL discovery resolves them from the install command's current
+directory; install from the executable directory or use absolute paths. Grant
+permissions separately for external ACL files, log-file directories, modules,
+and other paths. Starting Redis with command-line options does not disable the
+built-in `save` defaults; use `--save ""` when persistence must be disabled.
+
+Server multi-I/O-thread mode is unavailable in this Windows build. Startup
+rejects `io-threads` other than 1 and `io-threads-do-reads yes`; retain the safe
+defaults `io-threads 1` and `io-threads-do-reads no`.
+
+The packaged Windows configuration files are intentionally compact examples,
+not exhaustive Redis 6 references. Use `CONFIG GET *` and the source tree's
+upstream-aligned `redis.conf` for additional options, while ignoring POSIX-only
+settings. That upstream reference file is not part of the portable ZIP.
+
+### Persistence and replication
+
+RDB background saves and AOF rewrites use the Windows QFork implementation and
+a customized jemalloc 5.2.1 heap-tracking layer. Diskless replication is
+supported on both sides: a primary can stream a QFork-generated RDB, and a
+replica can use `repl-diskless-load disabled`, `on-empty-db`, or `swapdb`.
+`swapdb` retains the old dataset until the new stream is usable and restores
+both data and the cluster slot map if loading fails.
+
+Redis 6 replication supports ACL credentials through `masteruser` and
+`masterauth`, improved partial resynchronization, full-sync timeouts,
+replication progress fields in `INFO`, and `FAILOVER` for coordinated
+primary/replica handoff.
+
+QFork is a Windows-specific substitute for the RDB/AOF fork paths, not a
+general POSIX `fork()` implementation. Evaluate memory use and fork latency on
+production-sized datasets before rollout.
+
+### Cluster and Sentinel
+
+Redis Cluster uses Redis 6.2 command and failover behavior over the Windows
+IOCP transport, including replica migration controls, resharding, manual
+takeover, diskless `swapdb` recovery, and newer `INFO` error statistics.
+
+The package includes `redis-sentinel.exe`, implemented by the server executable
+in Sentinel mode, plus `sentinel.conf`. Sentinel supports ACL-protected
+monitored instances (`sentinel auth-user` and `auth-pass`), ACL protection for
+Sentinel itself, separate `sentinel-user` and `sentinel-pass` credentials
+between Sentinels, stable `SENTINEL MYID`, hostname resolution and announcement
+options, command introspection, and configuration rewrite.
+
+Do not enable TLS-only Cluster or Sentinel settings in the standard MinGW
+package; TLS is not built into it.
+
+### Modules and Lua debugging
+
+The Redis 6.2 module API is available for native Windows PE modules, including
+authentication, command filters, blocked clients and blocked-on-key operations,
+timers, streams, keyspace and server events, INFO fields, RDB/AUX persistence,
+propagation, scan, lazy-free, and datatype callbacks. Modules must be built for
+Windows x64 against this tree's `src/redismodule.h`; Linux shared objects cannot
+be loaded. The upstream test build uses a `.so` suffix for harness compatibility,
+but the file is still a Windows DLL.
+
+No modules are bundled in the portable ZIP. Existing Redis 5 Windows modules
+should be rebuilt and retested before production use.
+
+Callbacks executed inside a Windows QFork persistence child have a narrower
+contract than ordinary live-parent module callbacks. A compatible module is a
+single x64 PE DLL whose RDB, AUX, AOF-rewrite, and persistence-event callbacks
+reside in that primary image. Fork-visible globals must be plain data or point
+to memory obtained through the Redis module allocator so the target lives in
+the QFork heap. Delay imports, CFG/XFG or other nonzero extended PE load-config
+state, and module-defined static TLS are rejected. At each persistence
+snapshot, the primary DLL is resolved to its final volume path and held open
+without write or delete sharing until the child has terminated.
+
+Persistence callbacks must not depend on process-private CRT/C++ state,
+`malloc` pointers, `thread_local` or dynamically allocated TLS, custom
+`DllMain`/`atexit` behavior, Win32 handles, sockets, mutexes, helper-DLL mutable
+state, or concurrently changing module-thread state. Modules must quiesce or
+synchronize their own threads around fork-visible globals. Treat pre-fork
+Redis/module-allocator objects as read-only: do not insert into, remove from,
+resize, or free snapshot-owned containers or objects. Redis allocation APIs
+may be used for child-local scratch objects that are not linked into those
+containers. Keep persistence callbacks limited to persistence IO, logging,
+Redis strings/contexts, and such scratch allocation; blocking, networking,
+process, and thread-safe-context work is unsupported in the QFork child.
+Detectable PE or callback-image violations fail module loading or the
+background persistence start cleanly.
+
+The general `RedisModule_Fork` family is not exposed on Windows. Active
+defragmentation is supported through this port's customized jemalloc allocation
+hints; the Windows regression covers real movement with 4 MiB allocator pages
+and a QFork save/reload cycle. Lua debugging is supported only in synchronous
+mode: use `SCRIPT DEBUG sync` or `redis-cli --ldb-sync-mode`; forked `SCRIPT
+DEBUG yes` sessions are unsupported.
+
+### CLI, benchmark, service, and console
+
+`redis-cli` adds ACL authentication (`--user`, `--pass`, `--askpass`), RESP3
+(`-3`), RESP3 push display control, URI usernames, command-error exit status
+(`-e`), and newer key and memory inspection behavior. `redis-benchmark` adds
+ACL users, multi-thread mode, cluster mode, client tracking, error display,
+precision control, and HDR Histogram latency accounting.
+
+On Windows, `redis-benchmark` completes its initial TCP client connections
+before attaching them to IOCP event loops and before benchmark timing begins.
+Very large or remote initial client sets may therefore take longer to
+initialize. With `-k 0`, replacement connections occur during the measured run
+and can reduce total throughput or pause a worker loop, although per-request
+latency timing begins after each reconnect.
+
+Windows raw-pipe input and `redis-cli --rdb` file or standard-output paths use
+binary mode, so redirected RESP streams and RDB bytes are not altered by CRT
+newline translation.
+
+The Windows service interface remains:
+
+```text
+redis-server.exe --service-install [--service-name name] <config and options>
+redis-server.exe --service-start [--service-name name]
+redis-server.exe --service-stop [--service-name name]
+redis-server.exe --service-uninstall [--service-name name]
+```
+
+Service management requires elevation. The default installed service runs as
+`NT AUTHORITY\NetworkService`. Service mode always logs to the Windows
+Application Event Log; console mode does so only with `syslog-enabled yes`.
+The Event Source is fixed as `redis`, while `syslog-ident` is included in the
+message text. Built-in installation registers the service executable's embedded
+message table; the ZIP also carries `EventLog.dll` as a standalone/legacy
+message resource.
+
+All named services share that one Event Log registration. The first built-in
+install that creates it supplies `EventMessageFile`; later named installs do
+not refresh the path, and built-in uninstall of any name removes the shared
+registration. For multiple or side-by-side services, manage individual service
+deletion with SCM tools, keep the registered executable in place, and recreate
+the shared source from the intended surviving executable after removal or a
+path change. Windows does not support Redis daemonization; use console mode or
+the service interface.
+
+### Portable package and runtime dependencies
+
+The flat x64 ZIP contains `redis-server.exe`, `redis-sentinel.exe`,
+`redis-cli.exe`, `redis-benchmark.exe`, `redis-check-aof.exe`,
+`redis-check-rdb.exe`, `EventLog.dll`, console/service/Sentinel configuration
+examples, `README.txt`, the license, release notes, and this behavior guide. A
+separate `.sha256` file provides an integrity checksum for a ZIP obtained from a
+trusted channel.
+
+The MinGW support runtimes (`libgcc`, `libstdc++`, and winpthreads) are linked
+without external MinGW DLL dependencies. Normal Windows system DLLs, including
+MSVCRT, remain imports. The target does not need MSYS2, Tcl, or Visual Studio;
+test modules and build-only validation binaries are not shipped.
+
+### Windows-specific constraints
+
+- x64 MinGW is the supported release build. The Visual Studio/MSI projects are
+  legacy best-effort files.
+- The standard package has no OpenSSL/TLS support. `tls-port`, `rediss://`, TLS
+  replication, and TLS cluster links are unavailable.
+- Unix domain sockets are unavailable; use TCP on loopback or another bound
+  interface.
+- Server multi-I/O-thread mode is unavailable and rejected at startup; keep
+  `io-threads 1` and `io-threads-do-reads no`.
+- General module fork APIs and asynchronous/forked Lua debugger sessions are
+  unavailable.
+- POSIX daemon, systemd/upstart, Linux OOM-score, CPU-affinity, process-title,
+  THP, and signal behavior does not map directly to Windows; use the Windows
+  service and Event Log facilities.
+- QFork requires a stable virtual-address layout. The MinGW executables
+  intentionally disable dynamic-base and high-entropy ASLR at link time.
+- This is an unofficial port. Validate persistence, replication, modules,
+  service permissions, antivirus policy, and performance under the exact
+  Windows version and workload used in production.
+
+### Upgrade checklist
+
+1. Back up RDB, AOF, configuration, Sentinel, and ACL files.
+2. Install the portable files side-by-side and retain the ZIP checksum/source
+   commit. If using built-in services, account for the shared Event Log
+   registration described above.
+3. Review snapshot defaults, directory permissions, protected mode, bind
+   addresses, ACLs, and replication credentials.
+4. Keep clients on RESP2 initially; enable RESP3 deliberately.
+5. Rebuild native modules, retest any defragmentation callbacks, and confirm
+   they do not require module fork.
+6. Avoid old Redis 5 replicas or downgrade after using Redis 6-only commands.
+7. Exercise `PING`, authentication, representative commands, `BGSAVE`, AOF
+   rewrite, restart/reload, replication, and any Cluster, Sentinel, or service
+   paths used by the deployment.

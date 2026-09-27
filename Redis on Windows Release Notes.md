@@ -6,5 +6,5 @@ not the release record for this repository's current Redis 7.2.15 line.
 
 See [RELEASENOTES.txt](RELEASENOTES.txt) for current Windows port releases,
 [00-RELEASENOTES](00-RELEASENOTES) for upstream Redis release history, and
-[WINDOWS-7.2-CHANGES.md](WINDOWS-7.2-CHANGES.md) for Windows/Linux behavior and
+[WINDOWS-CHANGES.md](WINDOWS-CHANGES.md) for Windows/Linux behavior and
 upgrade differences. The historical 3.2 text remains available in Git history.

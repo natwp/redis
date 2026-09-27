@@ -5,7 +5,7 @@ MinGW portable package. The historical Visual Studio/MSI projects under
 `msvs/` are retained as best-effort compatibility files, but MSI installation
 is not the current package path and has not been validated for this release.
 
-Read [Redis 7.2 behavior in the Windows port](WINDOWS-7.2-CHANGES.md) before
+Read [Redis 7.2 behavior in the Windows port](WINDOWS-CHANGES.md) before
 deployment. Service management requires an elevated Windows token.
 
 ## Install, start, stop, and uninstall
