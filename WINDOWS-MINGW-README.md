@@ -62,15 +62,11 @@ processor groups. Focused checks do not replace the complete CI qualification.
 
 ## Performance investigations
 
-The public validation workflow has an optional `performance_analysis` dispatch
-input. Supply exact `baseline_sha` and `candidate_sha` commits to rebuild both
-with one MinGW64 toolchain. It compares the baseline with TLS-enabled and
-TLS-disabled candidate builds over plaintext TCP, using one baseline benchmark
-client, separate client/server CPU affinity, two complete rotations of the
-variants, and 250,000 requests per test. An optional `reference_sha` includes
-the original TLS-enabled build in the same run when evaluating a fix.
-Raw samples, binary identities, command counts,
-and user/kernel CPU time are retained in the performance artifact.
+Performance automation is on hold. The diagnostic harnesses retain the
+controlled A/B and gprof protocols for future investigations after the CI
+policy is reviewed. Run one investigation at a time with a common toolchain,
+explicit source commits, matching client settings, and recorded binary
+identities. Diagnostic results do not qualify a release.
 
 Separate builds use `-pg` for gprof call graphs and sampling. Their timings are
 kept separate from the uninstrumented A/B results. The profiled server keeps
@@ -79,7 +75,7 @@ An explicit `nm` symbol table preserves static function names in the profiles.
 The profiler runtime uses native CRT file functions to avoid symbol collisions
 with older FDAPI baselines; its original and adapted hashes are recorded.
 Profiles do not attribute time inside Windows DLLs; use the recorded kernel
-CPU measurements alongside the call graphs. This workflow builds diagnostic
+CPU measurements alongside the call graphs. The harnesses build diagnostic
 binaries without creating release packages or release qualification evidence.
 
 ## Native TLS
@@ -144,32 +140,31 @@ the pinned release qualification. x86-32, MSVC, and legacy Windows Server
 
 ## CI and releases
 
-Pull requests run public-source hygiene checks, a MinGW build, focused Redis
-tests in TLS and plaintext modes, explicit no-TLS builds, and Windows interop
-coverage. Pushes to canonical `mingw-*` branches run the complete Windows
-qualification, including the source suites, service integration,
-extracted-package audits, packaged replication, a 30-minute QFork persistence
-soak for each transport, and a short benchmark.
-Plaintext and TLS qualification run in parallel on separate Windows runners.
-Each runner runs the complete Root, Cluster, Sentinel and Module API suites,
-service tests, packaged replication and persistence soak in sequence against
-the same stripped package from a single build. Checksums and binary identity
-are verified before and after testing; release evidence requires both modes
-to pass. Native test helpers are transferred separately from the core package.
+Pull requests run public-source hygiene and lightweight offline checks with a
+ten-minute job limit. A manual `windows_smoke` dispatch on a `release-*` branch can run
+one MinGW64 build, focused Redis tests, and Windows interop checks, with a
+thirty-minute limit. It starts after hygiene succeeds. All Windows workflows
+share one concurrency group, and transport matrices allow one job at a time.
 
-Public releases are dispatched manually from the default branch with an exact
-canonical-branch commit and expected tag. CI performs one clean package build,
-strips that candidate before testing, extracts it, and runs the source suites
-and packaged checks against those same release bytes. A final hash and archive
-checksum gate runs before CI emits test evidence, an SPDX SBOM, and GitHub
-artifact attestations. The release workflow publishes that uploaded artifact
-without rebuilding it. No release package or tag is created locally. GitHub's
-repository-level release immutability setting must be enabled before the first
-public release.
+Full qualification, performance automation, and publication are on hold.
+Canonical branch pushes do not start full qualification. Before those retained
+workflows are enabled again, their evidence selection and API usage must be
+reviewed for explicit serial runs and the five-minute GitHub request interval.
+Long jobs are restricted to `release-*` branches. Development branches retain
+only short checks and established regression tests, including manual runs.
 
-See [RELEASE-POLICY.md](RELEASE-POLICY.md) for the maintained-line order,
-review policy, benchmark contract, and the small set of GitHub administrator
-settings that cannot be represented in source.
+A public release still requires all Windows source suites, service and Event
+Log coverage, package audits, replication, persistence, and binary identity
+checks for its exact source commit. Redis 8 qualifies the stripped package over
+TLS only. TLS-disabled builds, plaintext transport suites, and plaintext
+benchmarks are excluded from TLS-enabled release CI. Evidence records those
+checks as skipped. A rewritten commit needs fresh qualification.
+Packages, attestations, tags, and uploads are produced by explicitly enabled
+CI only. Existing immutable releases must not be replaced.
+
+The package revision remains declared in `packaging/mingw/windows-revision`.
+See [RELEASE-POLICY.md](RELEASE-POLICY.md) for release gates, maintained-line
+order, branch naming, and the conditions for ending the hold.
 
 ## Troubleshooting
 

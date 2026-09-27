@@ -11,7 +11,7 @@ MinGW ZIP independently of that legacy publication path.
 
 The current release path is the MinGW64 flat ZIP produced by
 package-mingw.sh. Read the repository root README.md,
-WINDOWS-7.4-CHANGES.md, Windows Service Documentation.md, and
+WINDOWS-CHANGES.md, Windows Service Documentation.md, and
 RELEASENOTES.txt before using the files in this directory.
 
 The redis.windows.conf and redis.windows-service.conf files remain the source

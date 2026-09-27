@@ -31,13 +31,16 @@ permissions:
   actions: read
 
 concurrency:
-  group: publish-windows-release-${{ inputs.source_branch }}-${{ inputs.source_sha }}
+  group: windows-ci
   cancel-in-progress: false
 
 jobs:
   preflight:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Verify release policy and maintained-line barrier
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       source_branch: ${{ steps.policy.outputs.source_branch }}
       source_sha: ${{ steps.policy.outputs.source_sha }}
@@ -171,9 +174,12 @@ jobs:
           printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
 
   attest:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Attest qualified release package and SBOM
     needs: preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -228,9 +234,12 @@ jobs:
           sbom-path: release-assets/sbom.spdx.json
 
   publish:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Create immutable GitHub release
     needs: [preflight, attest]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       actions: read

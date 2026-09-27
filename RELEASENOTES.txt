@@ -57,7 +57,7 @@ This revision completes the Windows-specific hardening pass for Unicode
 conversion boundaries, ASCII/punycode DNS resolver inputs, case-insensitive
 Windows identity comparisons, same-volume atomic replacement limits, QFork
 package provenance, repository-owned test cleanup, and hiredis Windows
-resolver assertions. Read WINDOWS-8.8-CHANGES.md for the exact behavior
+resolver assertions. Read WINDOWS-CHANGES.md for the exact behavior
 contract and unsupported-platform boundaries.
 
 The internal qualification covered source identity, package contents,
@@ -82,7 +82,7 @@ The portable archive is identified by `v8.8.1-windows.1` and
 `Redis-x64-8.8.1-mingw-r1.zip`. It is intentionally core-only: the bundled
 Redis Search, JSON, TimeSeries, probabilistic, and Vector Sets modules from the
 full upstream Redis 8 distribution are not built or included. Read
-WINDOWS-8.8-CHANGES.md before deployment or upgrade.
+WINDOWS-CHANGES.md before deployment or upgrade.
 
 Redis 8 uses the upstream RSALv2, SSPLv1, or AGPLv3 tri-license payload in
 LICENSE.txt. The archive also preserves REDISCONTRIBUTIONS.txt,
@@ -108,7 +108,7 @@ entry NACK, preventing the resulting use-after-free.
 
 The canonical Windows line is `mingw-7.4`; its first qualified package is
 identified by `v7.4.10-windows.1` and
-`Redis-x64-7.4.10-mingw-r1.zip`. Read WINDOWS-7.4-CHANGES.md for the
+`Redis-x64-7.4.10-mingw-r1.zip`. Read WINDOWS-CHANGES.md for the
 authoritative Windows-versus-Linux behavior, security, upgrade, QFork,
 networking, module, service, Event Log, and deployment constraints.
 
@@ -140,7 +140,7 @@ Redis-x64-7.2.14-mingw-r1.zip after the required clean-build,
 focused/full-suite, package, fresh-extraction, soak, and exact
 service-restart gates pass.
 
-WINDOWS-7.2-CHANGES.md is the authoritative Windows-versus-Linux behavior and
+WINDOWS-CHANGES.md is the authoritative Windows-versus-Linux behavior and
 upgrade guide. In particular, review its QFork/pagefile, fixed-VA/ASLR,
 single-I/O-thread, TCP-only/no-TLS, multi-part AOF, disk-backed replication,
 native PE-module, synchronous Lua-debugging, Event Log, and service-ACL notes.
@@ -176,10 +176,10 @@ This integration line ports the Redis 6.2.22 core to the existing Windows
 IOCP, QFork, service, Event Log, console, and MinGW64 layers. It adds the Redis
 6.2 command set, ACLs, RESP3, client tracking, expanded replication, Cluster,
 Sentinel, CLI, benchmark, and native module APIs described in
-WINDOWS-6.2-CHANGES.md.
+WINDOWS-CHANGES.md.
 
 The standard portable package is x64, has no OpenSSL/TLS support, and requires
-no external MinGW runtime DLLs. Read WINDOWS-6.2-CHANGES.md before upgrading or
+no external MinGW runtime DLLs. Read WINDOWS-CHANGES.md before upgrading or
 enabling Redis 6-only commands.
 
 --------------------------------------------------------

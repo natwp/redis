@@ -32,7 +32,7 @@ Package contents:
 - RELEASENOTES.txt - Windows port release notes and validation scope
 - 00-RELEASENOTES - upstream Redis release notes
 - BUILDINFO.txt - exact source commit, tree, toolchain, and package scope
-- WINDOWS-8.8-CHANGES.md - current Redis 8.8 Windows constraints and upgrade guide
+- WINDOWS-CHANGES.md - current Redis 8.8 Windows constraints and upgrade guide
 
 This package reports Redis 8.8.3. A public CI release uses
 `Redis-x64-8.8.3-mingw-r1.zip` and the matching revision tag; no tag or
@@ -43,7 +43,7 @@ RELEASENOTES.txt before upgrading.
 The included server configurations are Windows-oriented compatibility templates,
 not complete Redis 8.8 manuals. Their active directives have reviewed defaults,
 but some explanatory comments remain reference text inherited from upstream
-templates. Read WINDOWS-8.8-CHANGES.md first, then review ACLs,
+templates. Read WINDOWS-CHANGES.md first, then review ACLs,
 bind/protected-mode settings, the intentional disk-backed replication default,
 persistence, replication credentials, and directory permissions before use.
 

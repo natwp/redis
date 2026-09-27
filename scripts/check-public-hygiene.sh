@@ -41,13 +41,22 @@ if git ls-files --error-unmatch .local >/dev/null 2>&1 || [[ -n "$(git ls-files 
     failures=$((failures + 1))
 fi
 
+private_agent_files="$(git ls-files -- \
+    ':(glob)**/AGENTS.md' ':(glob)**/AGENTS.*.md' \
+    ':(glob)**/CLAUDE.md' ':(glob)**/GEMINI.md' \
+    '.codex/**' '.claude/**' '.agents/**' '.env' 'codex.sh' \
+    'WINDOWS-*AUDIT*.md' '*CODE-AUDIT*.md' '*code-audit*.md')"
+if [[ -n "$private_agent_files" ]]; then
+    echo "error: agent guidance or private audit records are tracked" >&2
+    printf '%s\n' "$private_agent_files" >&2
+    failures=$((failures + 1))
+fi
+
 port_paths=(
-    AGENTS.md
     README.md
     WINDOWS-MINGW-README.md
     WINDOWS-PORTING-HISTORY.md
-    'WINDOWS-*-CHANGES.md'
-    WINDOWS-8.10-SOURCE-AUDIT.md
+    WINDOWS-CHANGES.md
     build-mingw.sh
     package-mingw.sh
     runtest-mingw.sh
@@ -74,17 +83,16 @@ report_matches \
 report_matches \
     "internal hosting or Git endpoint in Windows-port guidance" \
     '(Gitea|git@[[:alnum:]_.-]+:|ssh://[[:alnum:]_.@-]+)' \
-    AGENTS.md README.md WINDOWS-MINGW-README.md WINDOWS-PORTING-HISTORY.md \
-    'WINDOWS-*-CHANGES.md' WINDOWS-8.10-SOURCE-AUDIT.md \
+    README.md WINDOWS-MINGW-README.md WINDOWS-PORTING-HISTORY.md \
+    WINDOWS-CHANGES.md \
     build-mingw.sh package-mingw.sh runtest-mingw.sh runtest-moduleapi \
     tests/windows
 
 report_matches \
     "operational PID in public-facing documentation" \
     '\bPID[[:space:]]+[[:digit:]]+' \
-    AGENTS.md WINDOWS-MINGW-README.md WINDOWS-PORTING-HISTORY.md \
-    'WINDOWS-*-CHANGES.md' \
-    WINDOWS-8.10-SOURCE-AUDIT.md
+    WINDOWS-MINGW-README.md WINDOWS-PORTING-HISTORY.md \
+    WINDOWS-CHANGES.md
 
 report_matches \
     "private-key or service-token signature" \

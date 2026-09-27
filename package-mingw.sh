@@ -56,8 +56,7 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "error: invalid Redis release version in src/version.h: $version" >&2
     exit 1
 fi
-release_line="${version%.*}"
-windows_changes="WINDOWS-${release_line}-CHANGES.md"
+windows_changes="WINDOWS-CHANGES.md"
 if [[ ! -f "$windows_changes" ]]; then
     echo "error: release-line guide not found: $windows_changes" >&2
     exit 1
