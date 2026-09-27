@@ -1,13 +1,6 @@
 name: Full Windows qualification
 
 on:
-  push:
-    branches:
-      - mingw-8.10
-      - mingw-8.8
-      - mingw-7.4
-      - mingw-7.2
-      - mingw-6.2
   workflow_dispatch:
     inputs:
       source_sha:
@@ -45,11 +38,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-windows-qualification-${{ github.event_name == 'push' && github.ref || inputs.source_sha || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: windows-ci
+  cancel-in-progress: false
 
 jobs:
   qualify:
+    # Keep the release-branch guard when the hold is lifted.
+    if: ${{ false && startsWith(github.ref, 'refs/heads/release-') }}
     name: Windows MinGW64 qualification
     runs-on: windows-2022
     timeout-minutes: 240

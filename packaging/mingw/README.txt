@@ -21,14 +21,14 @@ Package contents:
   toolchain, allocator, file sizes, hashes, and feature-scope identity
 - RELEASENOTES.txt - Windows port release notes and validation scope
 - 00-RELEASENOTES - upstream Redis release notes
-- WINDOWS-6.2-CHANGES.md - command, compatibility, configuration, persistence,
+- WINDOWS-CHANGES.md - command, compatibility, configuration, persistence,
   service, module, packaging, and Windows-constraint guide
 
 This package reports Redis 6.2.24. A public CI release uses
 `Redis-x64-6.2.24-mingw-r2.zip` and tag `v6.2.24-windows.2`; no tag or archive
 is created locally. The tag, BUILDINFO source commit/tree, archive, package
 manifest, release test report, and adjacent SHA-256 checksum must agree. Read
-WINDOWS-6.2-CHANGES.md before upgrading.
+WINDOWS-CHANGES.md before upgrading.
 
 The included configuration files are compact Windows examples, not exhaustive
 Redis 6 option references. Review ACLs, bind/protected-mode settings,

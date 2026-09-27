@@ -1,6 +1,16 @@
-# Redis 6.2 behavior in the Windows port
+# Windows changes for Redis 6.2.24
 
-## Scope and identity
+This file records the Windows behavior and upgrade guidance on `mingw-6.2`.
+The current-line section describes this branch. Earlier-line sections preserve
+historical behavior and upgrade notes with their original version boundaries.
+
+Publication and full qualification are on hold; package names below identify
+candidates or historical releases, not qualification of this rewritten source.
+
+## Redis 6.2 (current line)
+
+
+### Scope and identity
 
 This is an unofficial Windows x64 port of the Redis 6.2.24 core, based on
 upstream commit `bfb69472301cb656043d3cbba332b406ef1d885a`, combined with this fork's IOCP networking,
@@ -18,7 +28,7 @@ RESP2 remains the default protocol, so existing Redis 5 clients normally keep
 working. RESP3, ACLs, client-side caching, and other Redis 6 behavior are
 opt-in unless configured.
 
-## Windows revision 2 maintenance
+### Windows revision 2 maintenance
 
 This candidate adds processor-group CPU affinity and enables dynamic-base,
 high-entropy ASLR, NX, and base relocations for the CLI, benchmark, and standalone
@@ -43,7 +53,7 @@ Every final source tip requires fresh Windows qualification before publication.
 Redis 6.2 retains its original connection interfaces and POSIX event loop.
 Windows service stop uses the normal main-thread AOF/RDB shutdown path.
 
-## Commands, protocol, and security
+### Commands, protocol, and security
 
 Redis 6.2.24 rejects corrupt stream RDB and `RESTORE` payloads that assign the
 same pending entry to multiple consumers. Enforcing one consumer per NACK
@@ -77,7 +87,7 @@ The Windows IOCP listener preserves the address family of IPv4 and IPv6
 connections. Protected mode recognizes both `127.0.0.1` and `::1` as loopback,
 including when replication or Sentinel hostname resolution selects IPv6 first.
 
-## Compatibility changes from Redis 5
+### Compatibility changes from Redis 5
 
 Applications should review these Redis 6 behavior changes:
 
@@ -109,7 +119,7 @@ Sentinel, and ACL files before upgrading. Test rollback before using Redis
 The old `SLAVEOF` command and `slave-*` configuration spellings remain aliases.
 New configurations should use `REPLICAOF` and `replica-*` names.
 
-## Configuration and defaults
+### Configuration and defaults
 
 The packaged console and service examples bind to `127.0.0.1`, keep protected
 mode enabled, leave AOF disabled, use `tcp-keepalive 300`, and use these
@@ -152,7 +162,7 @@ not exhaustive Redis 6 references. Use `CONFIG GET *` and the source tree's
 upstream-aligned `redis.conf` for additional options, while ignoring POSIX-only
 settings. That upstream reference file is not part of the portable ZIP.
 
-## Windows text, naming, and filesystem contract
+### Windows text, naming, and filesystem contract
 
 Redis keeps arguments, configuration values, environment values, paths, and
 diagnostics as UTF-8. Invalid UTF-8 is rejected; valid strings are converted
@@ -179,7 +189,7 @@ equivalent of POSIX directory `fsync()`. Storage caches and transient sharing
 violations from antivirus, backup, or indexing software can therefore still
 affect crash durability or cause an operation to fail after its bounded retry.
 
-## Persistence and replication
+### Persistence and replication
 
 RDB background saves and AOF rewrites use the Windows QFork implementation and
 a customized jemalloc 5.2.1 heap-tracking layer. Diskless replication is
@@ -197,7 +207,7 @@ QFork is a Windows-specific substitute for the RDB/AOF fork paths, not a
 general POSIX `fork()` implementation. Evaluate memory use and fork latency on
 production-sized datasets before rollout.
 
-## Windows hardening and validated contracts (August 17, 2026)
+### Windows hardening and validated contracts (August 17, 2026)
 
 The current Windows hardening pass makes the porting boundaries explicit and
 keeps the Windows behavior deterministic:
@@ -249,7 +259,7 @@ release steps. Visual Studio/MSI, antivirus, reboot/preshutdown, and
 clean-machine checks are explicitly deferred rather than implied by the
 MinGW qualification.
 
-## Cluster and Sentinel
+### Cluster and Sentinel
 
 Redis Cluster uses Redis 6.2 command and failover behavior over the Windows
 IOCP transport, including replica migration controls, resharding, manual
@@ -265,7 +275,7 @@ options, command introspection, and configuration rewrite.
 Do not enable TLS-only Cluster or Sentinel settings in the standard MinGW
 package; TLS is not built into it.
 
-## Modules and Lua debugging
+### Modules and Lua debugging
 
 The Redis 6.2 module API is available for native Windows PE modules, including
 authentication, command filters, blocked clients and blocked-on-key operations,
@@ -309,7 +319,7 @@ and a QFork save/reload cycle. Lua debugging is supported only in synchronous
 mode: use `SCRIPT DEBUG sync` or `redis-cli --ldb-sync-mode`; forked `SCRIPT
 DEBUG yes` sessions are unsupported.
 
-## CLI, benchmark, service, and console
+### CLI, benchmark, service, and console
 
 `redis-cli` adds ACL authentication (`--user`, `--pass`, `--askpass`), RESP3
 (`-3`), RESP3 push display control, URI usernames, command-error exit status
@@ -354,7 +364,7 @@ the shared source from the intended surviving executable after removal or a
 path change. Windows does not support Redis daemonization; use console mode or
 the service interface.
 
-## Portable package and runtime dependencies
+### Portable package and runtime dependencies
 
 The flat x64 ZIP contains `redis-server.exe`, `redis-sentinel.exe`,
 `redis-cli.exe`, `redis-benchmark.exe`, `redis-check-aof.exe`,
@@ -370,7 +380,7 @@ without external MinGW DLL dependencies. Normal Windows system DLLs, including
 MSVCRT, remain imports. The target does not need MSYS2, Tcl, or Visual Studio;
 test modules and build-only validation binaries are not shipped.
 
-## Windows-specific constraints
+### Windows-specific constraints
 
 - x64 MinGW is the supported release build. The Visual Studio/MSI projects are
   legacy best-effort files.
@@ -391,7 +401,7 @@ test modules and build-only validation binaries are not shipped.
   service permissions, antivirus policy, and performance under the exact
   Windows version and workload used in production.
 
-## Upgrade checklist
+### Upgrade checklist
 
 1. Back up RDB, AOF, configuration, Sentinel, and ACL files.
 2. Install the portable files side-by-side and retain the ZIP checksum/source

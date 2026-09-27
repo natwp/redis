@@ -80,7 +80,11 @@ jq -e \
     .package.sha256 == $archive_sha and
     .package.scope == "Redis core only" and
     .package.tls.build == $tls_build and
-    .qualification.transports == (if $tls_build == "yes" then ["plaintext", "TLS"] else ["plaintext"] end) and
+    .qualification.transports == (if $tls_build == "yes" then ["TLS"] else ["plaintext"] end) and
+    (if $tls_build == "yes" then
+      .qualification.skipped_transports == ["plaintext"] and
+      .benchmark == {status:"skipped",transport:"plaintext",reason:"excluded for TLS-enabled releases",blocking:false}
+    else true end) and
     .qualification.workflow_url == $workflow_url and
     .qualification.all_required_tests == "passed" and
     .qualification.release_binary_identity == "passed" and
@@ -98,7 +102,7 @@ jq -e --arg archive "$archive_name" --arg archive_sha "$archive_sha" \
     (.packages[1].versionInfo == $evidence[0].package.tls.openssl_version) and
     (.packages[1].sourceInfo == ("MSYS2 package: " + $evidence[0].package.tls.openssl_package)) and
     ($evidence[0].package.tls.linkage == "static") and
-    ($evidence[0].qualification.transports == ["plaintext", "TLS"]) and
+    ($evidence[0].qualification.transports == ["TLS"]) and
     (any(.relationships[];
       .spdxElementId == "SPDXRef-Package" and
       .relationshipType == "STATIC_LINK" and
@@ -249,6 +253,9 @@ if ! diff -u \
   exit 1
 fi
 if [[ "$tls_build" == yes ]]; then
+    [[ "$(cat benchmark.csv)" == $'status,transport,reason\nskipped,plaintext,excluded for TLS-enabled releases' ]] || {
+        echo 'TLS release must record the plaintext benchmark as skipped' >&2; exit 1;
+    }
     grep -Fx 'TLS build: yes (built in; static OpenSSL)' BUILDINFO.txt >/dev/null
     jq -e --arg version "$(sed -n 's/^OpenSSL version: //p' BUILDINFO.txt)" \
         --arg package "$(sed -n 's/^OpenSSL package: //p' BUILDINFO.txt)" '

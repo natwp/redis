@@ -77,10 +77,10 @@ This integration line ports the Redis 6.2.22 core to the existing Windows
 IOCP, QFork, service, Event Log, console, and MinGW64 layers. It adds the Redis
 6.2 command set, ACLs, RESP3, client tracking, expanded replication, Cluster,
 Sentinel, CLI, benchmark, and native module APIs described in
-WINDOWS-6.2-CHANGES.md.
+WINDOWS-CHANGES.md.
 
 The standard portable package is x64, has no OpenSSL/TLS support, and requires
-no external MinGW runtime DLLs. Read WINDOWS-6.2-CHANGES.md before upgrading or
+no external MinGW runtime DLLs. Read WINDOWS-CHANGES.md before upgrading or
 enabling Redis 6-only commands.
 
 --------------------------------------------------------
